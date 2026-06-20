@@ -1923,6 +1923,71 @@ final class CLINotifyProcessIntegrationRegressionTests: XCTestCase {
         )
     }
 
+    func testAntigravityStopUsesSingleObjectJSONTranscriptMessage() throws {
+        let context = try makeClaudeHookContext(name: "antigravity-json-stop")
+        defer { context.cleanup() }
+
+        let sessionId = "antigravity-json-stop-session"
+        let transcriptURL = context.root.appendingPathComponent("antigravity-session.json")
+        let transcript: [String: Any] = [
+            "sessionId": sessionId,
+            "projectHash": "project-hash",
+            "messages": [
+                [
+                    "type": "user",
+                    "content": "finish the JSON transcript support",
+                ],
+                [
+                    "type": "gemini",
+                    "content": "Earlier assistant text.",
+                ],
+                [
+                    "role": "model",
+                    "parts": [["text": "Final Antigravity JSON summary."]],
+                ],
+            ],
+        ]
+        try JSONSerialization.data(withJSONObject: transcript, options: [.prettyPrinted])
+            .write(to: transcriptURL, options: .atomic)
+
+        let launchEnvironment = agentLaunchEnvironment(
+            context: context,
+            kind: "antigravity",
+            executable: "/usr/local/bin/agy",
+            arguments: ["/usr/local/bin/agy", "--conversation", sessionId]
+        )
+        startAgentHookMockServerAccepting(context: context, connectionLimit: 48)
+
+        let prompt = runAgentHook(
+            context: context,
+            agent: "antigravity",
+            subcommand: "prompt-submit",
+            standardInput: #"{"session_id":"\#(sessionId)","turn_id":"turn-1","cwd":"\#(context.root.path)","transcript_path":"\#(transcriptURL.path)","hook_event_name":"PreInvocation","prompt":"continue"}"#,
+            extraEnvironment: launchEnvironment
+        )
+        XCTAssertFalse(prompt.timedOut, prompt.stderr)
+        XCTAssertEqual(prompt.status, 0, prompt.stderr)
+
+        let stopStart = context.state.commands.count
+        let stop = runAgentHook(
+            context: context,
+            agent: "antigravity",
+            subcommand: "stop",
+            standardInput: #"{"session_id":"\#(sessionId)","turn_id":"turn-1","cwd":"\#(context.root.path)","transcript_path":"\#(transcriptURL.path)","hook_event_name":"Stop"}"#,
+            extraEnvironment: launchEnvironment
+        )
+        XCTAssertFalse(stop.timedOut, stop.stderr)
+        XCTAssertEqual(stop.status, 0, stop.stderr)
+        let stopCommands = Array(context.state.commands.dropFirst(stopStart))
+        XCTAssertTrue(
+            stopCommands.contains {
+                $0.hasPrefix("notify_target_async \(context.workspaceId) \(context.surfaceId) Antigravity|") &&
+                    $0.contains("Final Antigravity JSON summary.")
+            },
+            "Expected Antigravity Stop notification to use the JSON transcript assistant text, saw \(stopCommands)"
+        )
+    }
+
     func testCodexTurnStackPreservesAnonymousDepthBetweenKnownTurns() throws {
         let context = try makeClaudeHookContext(name: "codex-mixed-anonymous-depth")
         defer { context.cleanup() }

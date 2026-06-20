@@ -24764,54 +24764,44 @@ struct CMUXCLI {
         return TranscriptSummary(lastAssistantMessage: lastAssistantMessage)
     }
 
-    private func readAgentTranscriptSummary(path: String) -> TranscriptSummary? {
-        guard let lines = readRecentTextFileLines(path: path, maxBytes: 1_048_576) else { return nil }
-
-        var lastAssistantMessage: String?
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty,
-                  let lineData = trimmed.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let text = assistantTranscriptText(from: object),
-                  !text.isEmpty else {
-                continue
+    private func readAntigravityTranscriptSummary(path: String) -> TranscriptSummary? {
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+        let engine = AutoNamingEngine()
+        let messages: [AutoNamingTranscriptMessage]
+        if url.pathExtension == "json" {
+            guard let object = readJSONDictionaryFile(path: expandedPath, maxBytes: 16 * 1024 * 1024) else {
+                return nil
             }
-            lastAssistantMessage = truncate(normalizedSingleLine(text), maxLength: 120)
+            messages = engine.extractAntigravityMessages(fromTranscriptObject: object)
+        } else {
+            guard let lines = readRecentTextFileLines(path: expandedPath, maxBytes: 1_048_576) else {
+                return nil
+            }
+            messages = engine.extractAntigravityMessages(fromTranscriptLines: lines)
         }
-
-        guard lastAssistantMessage != nil else { return nil }
-        return TranscriptSummary(lastAssistantMessage: lastAssistantMessage)
+        guard let lastAssistant = messages.last(where: { $0.role == "assistant" }) else {
+            return nil
+        }
+        return TranscriptSummary(lastAssistantMessage: truncate(normalizedSingleLine(lastAssistant.text), maxLength: 120))
     }
 
-    private func assistantTranscriptText(from object: [String: Any]) -> String? {
-        let containers: [[String: Any]] = [
-            object,
-            object["message"] as? [String: Any],
-            object["payload"] as? [String: Any],
-            object["data"] as? [String: Any],
-        ].compactMap { $0 }
-
-        for container in containers {
-            let role = firstString(in: container, keys: ["role", "author", "speaker"])?.lowercased()
-            let type = firstString(in: container, keys: ["type", "kind"])?.lowercased()
-            let isAssistant =
-                role == "assistant" || role == "agent" || role == "model" ||
-                type == "assistant" || type == "assistant_message" ||
-                type == "agent" || type == "agent_message"
-            guard isAssistant else { continue }
-
-            if let text = extractMessageText(from: container), !text.isEmpty {
-                return text
-            }
-            if let text = firstString(in: container, keys: ["text", "body", "summary"]) {
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { return trimmed }
-            }
+    private func readJSONDictionaryFile(path: String, maxBytes: UInt64) -> [String: Any]? {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return nil
         }
-
-        return nil
+        defer { try? handle.close() }
+        do {
+            let size = try handle.seekToEnd()
+            guard size <= maxBytes else { return nil }
+            try handle.seek(toOffset: 0)
+            guard let data = try handle.readToEnd(), !data.isEmpty else {
+                return nil
+            }
+            return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        } catch {
+            return nil
+        }
     }
 
     private struct CodexHookFailureSummary {
@@ -30575,7 +30565,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
                       antigravityFailure == nil,
                       let transcriptPath = normalizedHookValue(input.transcriptPath ?? mapped?.transcriptPath)
                 else { return nil }
-                return readAgentTranscriptSummary(path: transcriptPath)?.lastAssistantMessage
+                return readAntigravityTranscriptSummary(path: transcriptPath)?.lastAssistantMessage
             }()
             let projectName: String? = {
                 guard let cwd, !cwd.isEmpty else { return nil }

@@ -191,7 +191,7 @@ notify = ["bash", "~/.local/bin/codex-notify.sh"]
 
 Use `cmux hooks setup antigravity` or `cmux hooks setup agy`. The installer writes Antigravity's native hook group to `~/.gemini/config/hooks.json`, records lifecycle/status notifications, and adds Feed telemetry/approval cards for `PreToolUse` and `PostToolUse`.
 
-On `Stop`, cmux prefers Antigravity's explicit assistant text when it is present. If the hook only provides `transcriptPath`, cmux reads the recent JSONL transcript tail and shows the last assistant/agent/model message in the completion notification.
+On `Stop`, cmux prefers Antigravity's explicit assistant text when it is present. If the hook only provides `transcriptPath`, cmux reads the recent JSONL transcript tail or newer single-object `.json` transcript and shows the last assistant/model message in the completion notification.
 
 ### OpenCode Plugin
 
