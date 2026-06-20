@@ -1,5 +1,6 @@
 import Foundation
 import CMUXAgentLaunch
+import CmuxAgentChat
 import CmuxFoundation
 import CmuxSettings
 import CoreFoundation
@@ -2755,6 +2756,38 @@ final class SocketClient {
     }
 }
 
+private final class CLIPilotRPCTransport: @unchecked Sendable {
+    private let client: SocketClient
+    private let responseTimeout: TimeInterval?
+    private let queue = DispatchQueue(label: "com.cmux.cli.pilot-rpc-transport")
+
+    init(client: SocketClient, responseTimeout: TimeInterval? = nil) {
+        self.client = client
+        self.responseTimeout = responseTimeout
+    }
+
+    func send(
+        method: String,
+        params: [String: PilotTuiRPCValue]
+    ) async throws -> [String: PilotTuiRPCValue] {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [client, responseTimeout] in
+                do {
+                    let jsonParams = PilotTuiRPCValue.jsonObjectDictionary(from: params)
+                    let response = try client.sendV2(
+                        method: method,
+                        params: jsonParams,
+                        responseTimeout: responseTimeout
+                    )
+                    continuation.resume(returning: PilotTuiRPCValue.dictionary(from: response))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
 struct CMUXCLI {
     let args: [String]
     let initialSIGPIPEInspectionPayload: [String: Any]?
@@ -2763,6 +2796,26 @@ struct CMUXCLI {
     private static let vmCreateResponseTimeoutSeconds: TimeInterval = 16 * 60
     private static let vmAttachResponseTimeoutSeconds: TimeInterval = 16 * 60
     private static let claudeCodeStatusKey = "claude_code"
+    static let pilotUsage = """
+        Usage: cmux pilot select --option <n> [flags]
+               cmux pilot select <n> [flags]
+
+        Drive a detected Pilot TUI menu on a terminal surface through the live cmux socket.
+
+        Flags:
+          --option <n>                 Numbered menu option to select
+          --confidence <0...1>         Confidence for the choice (default: 1)
+          --required-confidence <0...1>
+                                       Minimum confidence before selecting (default: 0.7)
+          --lines <n>                  Terminal lines to read before parsing (default: 120)
+          --workspace <id|ref|index>   Target workspace (default: $CMUX_WORKSPACE_ID)
+          --surface <id|ref|index>     Target surface (default: $CMUX_SURFACE_ID)
+          --window <id|ref|index>      Window context for workspace/surface refs and indexes
+
+        Examples:
+          cmux pilot select --option 2
+          cmux pilot select 1 --surface surface:2 --confidence 0.92 --json
+        """
 
     private static var allowedAgentLifecycleStatusKeys: Set<String> {
         var keys = Set(agentDefs.map(\.statusKey))
@@ -2934,16 +2987,16 @@ struct CMUXCLI {
     private static let commandOptionsWithValues: Set<String> = [
         "--action", "--after-workspace", "--agent", "--amount", "--arch",
         "--attr", "--before-workspace", "--body", "--color", "--command",
-        "--config", "--cwd", "--description", "--direction", "--domain",
+        "--confidence", "--config", "--cwd", "--description", "--direction", "--domain",
         "--dx", "--dy", "--email", "--event", "--expires", "--focus",
         "--function", "--id", "--image", "--index", "--key", "--kind",
         "--layout", "--lines", "--load-state", "--max-depth", "--name", "--os",
-        "--order", "--out", "--pane", "--panel", "--path", "--profile", "--property",
+        "--option", "--order", "--out", "--pane", "--panel", "--path", "--profile", "--property",
         "--provider", "--relay-port", "--script", "--selector", "--session",
         "--shell", "--source", "--subtitle", "--surface", "--tab", "--target-pane",
         "--text", "--timeout", "--timeout-ms", "--title", "--transcript",
         "--turn", "--type", "--url", "--url-contains", "--value", "--window",
-        "--workspace", "--checkpoint", "--checkpoint-id",
+        "--workspace", "--checkpoint", "--checkpoint-id", "--required-confidence",
     ]
 
     private func parsePresentationOptions(
@@ -2989,6 +3042,175 @@ struct CMUXCLI {
             index += 1
         }
         return (jsonOutput, idFormat, remaining)
+    }
+
+    private func runSynchronousPilotTask<T>(
+        _ operation: @escaping () async throws -> T
+    ) throws -> T {
+        let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var result: Result<T, Error>?
+
+        Task {
+            let taskResult: Result<T, Error>
+            do {
+                taskResult = .success(try await operation())
+            } catch {
+                taskResult = .failure(error)
+            }
+            lock.lock()
+            result = taskResult
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+        lock.lock()
+        let finalResult = result
+        lock.unlock()
+        guard let finalResult else {
+            throw CLIError(message: "pilot task did not return a result")
+        }
+        return try finalResult.get()
+    }
+
+    private func runPilotCommand(
+        commandArgs: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        windowOverride: String?
+    ) throws {
+        guard let subcommand = commandArgs.first?.lowercased() else {
+            throw CLIError(message: "Usage: cmux pilot select --option <n> [flags]")
+        }
+
+        switch subcommand {
+        case "select":
+            try runPilotSelectCommand(
+                arguments: Array(commandArgs.dropFirst()),
+                client: client,
+                jsonOutput: jsonOutput,
+                windowOverride: windowOverride
+            )
+        case "help":
+            print(Self.pilotUsage)
+        default:
+            throw CLIError(message: "Unknown pilot subcommand: \(subcommand)")
+        }
+    }
+
+    private func runPilotSelectCommand(
+        arguments: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        windowOverride: String?
+    ) throws {
+        let (optionArg, rem0) = parseOption(arguments, name: "--option")
+        let (confidenceArg, rem1) = parseOption(rem0, name: "--confidence")
+        let (requiredConfidenceArg, rem2) = parseOption(rem1, name: "--required-confidence")
+        let (linesArg, rem3) = parseOption(rem2, name: "--lines")
+        let (wsArg, rem4) = parseOption(rem3, name: "--workspace")
+        let (sfArg, rem5) = parseOption(rem4, name: "--surface")
+        let (windowOpt, rem6) = parseOption(rem5, name: "--window")
+
+        var trailing = rem6
+        var positionalOption: String?
+        if optionArg == nil, let first = trailing.first, !first.hasPrefix("-") {
+            positionalOption = trailing.removeFirst()
+        }
+        guard trailing.isEmpty else {
+            throw CLIError(message: "pilot select: unexpected arguments: \(trailing.joined(separator: " "))")
+        }
+
+        guard let rawOption = optionArg ?? positionalOption,
+              let targetNumber = Int(rawOption),
+              targetNumber > 0 else {
+            throw CLIError(message: "pilot select requires --option <positive-number>")
+        }
+        let confidence = try parsePilotConfidence(confidenceArg ?? "1", optionName: "--confidence")
+        let requiredConfidence = try parsePilotConfidence(requiredConfidenceArg ?? "0.7", optionName: "--required-confidence")
+        let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
+
+        let windowRaw = windowOpt ?? windowOverride
+        let env = ProcessInfo.processInfo.environment
+        let workspaceArg = wsArg ?? (windowRaw == nil ? env["CMUX_WORKSPACE_ID"] : nil)
+        let surfaceArg = sfArg ?? (wsArg == nil && windowRaw == nil ? env["CMUX_SURFACE_ID"] : nil)
+
+        let winId = try normalizeWindowHandle(windowRaw, client: client)
+        let wsId = try normalizeWorkspaceHandle(workspaceArg, client: client, windowHandle: winId)
+        let sfId = try normalizeSurfaceHandle(surfaceArg, client: client, workspaceHandle: wsId, windowHandle: winId)
+        let target = PilotTuiSurfaceTarget(windowID: winId, workspaceID: wsId, surfaceID: sfId)
+        let transport = CLIPilotRPCTransport(client: client)
+        let driver = PilotTuiRPCSurfaceDriver(
+            target: target,
+            transport: { method, params in
+                try await transport.send(method: method, params: params)
+            }
+        )
+
+        let result = try runSynchronousPilotTask {
+            try await PilotTuiAutoSelector.run(
+                driver: driver,
+                request: PilotTuiAutoSelectRequest(
+                    targetNumber: targetNumber,
+                    confidence: confidence,
+                    requiredConfidence: requiredConfidence,
+                    readLines: readLines,
+                    submitIfReady: false
+                )
+            )
+        }
+
+        if jsonOutput {
+            print(jsonString(pilotSelectPayload(result)))
+        } else {
+            print(pilotSelectSummary(result))
+        }
+    }
+
+    private func parsePilotConfidence(_ raw: String, optionName: String) throws -> Double {
+        guard let value = Double(raw), value >= 0, value <= 1 else {
+            throw CLIError(message: "\(optionName) must be between 0 and 1")
+        }
+        return value
+    }
+
+    private func parsePilotPositiveInt(_ raw: String, optionName: String) throws -> Int {
+        guard let value = Int(raw), value > 0 else {
+            throw CLIError(message: "\(optionName) must be greater than 0")
+        }
+        return value
+    }
+
+    private func pilotSelectPayload(_ result: PilotTuiAutoSelectResult) -> [String: Any] {
+        switch result {
+        case .submitted(let keys):
+            return ["status": "submitted", "keys": keys.map(\.rawValue)]
+        case .selected(let targetNumber, let keys):
+            return ["status": "selected", "target_number": targetNumber, "keys": keys.map(\.rawValue)]
+        case .escaped(let keys, let reason):
+            return ["status": "escaped", "reason": reason, "keys": keys.map(\.rawValue)]
+        case .skipped(let reason):
+            return ["status": "skipped", "reason": reason, "keys": [] as [String]]
+        }
+    }
+
+    private func pilotSelectSummary(_ result: PilotTuiAutoSelectResult) -> String {
+        switch result {
+        case .submitted(let keys):
+            return "submitted with \(pilotKeySummary(keys))"
+        case .selected(let targetNumber, let keys):
+            return "selected option \(targetNumber) with \(pilotKeySummary(keys))"
+        case .escaped(let keys, let reason):
+            return "escaped with \(pilotKeySummary(keys)): \(reason)"
+        case .skipped(let reason):
+            return "skipped: \(reason)"
+        }
+    }
+
+    private func pilotKeySummary(_ keys: [PilotTuiKey]) -> String {
+        let values = keys.map(\.rawValue)
+        return values.isEmpty ? "no keys" : values.joined(separator: ",")
     }
 
     private func runBrowserAvailabilityCommand(
@@ -3518,6 +3740,14 @@ struct CMUXCLI {
         let capturesSocketErrorsInsideCommand = ["claude-hook", "codex-hook", "feed-hook", "hooks"].contains(command) // Backwards compatibility aliases stay hidden from help.
         do {
         switch command {
+        case "pilot":
+            try runPilotCommand(
+                commandArgs: commandArgs,
+                client: client,
+                jsonOutput: jsonOutput,
+                windowOverride: windowId
+            )
+
         case "ping":
             let response = try sendV1Command("ping", client: client)
             print(response)
@@ -5299,6 +5529,7 @@ struct CMUXCLI {
         "open-browser",
         "open-notification",
         "paste-buffer",
+        "pilot",
         "ping",
         "pipe-pane",
         "popup",
@@ -14071,6 +14302,8 @@ struct CMUXCLI {
         switch command {
         case "remotes", "remote":
             return Self.remotesUsage
+        case "pilot":
+            return Self.pilotUsage
         case "ping":
             return """
             Usage: cmux ping
@@ -34142,6 +34375,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>]
           feedback [--email <email> --body <text> [--image <path> ...]]
           feed tui|clear
+          pilot select --option <n> [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           themes [list|set|clear]
           claude-teams [claude-args...]
           codex-teams [codex-args...]
@@ -34209,6 +34443,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           rename-window [--workspace <id|ref|index>] [--window <id|ref|index>] <title>
           current-workspace [--window <id|ref|index>]
           read-screen [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--scrollback] [--lines <n>]
+          pilot select --option <n> [--confidence <0...1>] [--required-confidence <0...1>] [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           send [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <text>
           send-key [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <key>
           send-panel --panel <id|ref|index> [--workspace <id|ref|index>] [--window <id|ref|index>] <text>
