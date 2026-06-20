@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CryptoKit
 
 #if canImport(cmux_DEV)
     @testable import cmux_DEV
@@ -44,6 +45,25 @@ import Testing
             )
         }
         return (AgentChatTranscriptResolver(homeDirectory: home), home, cwd.path)
+    }
+
+    private static func antigravityRecord(sessionID: String, cwd: String) -> AgentChatSessionRecord {
+        AgentChatSessionRecord(
+            sessionID: sessionID,
+            agentKind: .antigravity,
+            workspaceID: nil,
+            surfaceID: nil,
+            workingDirectory: cwd,
+            transcriptPath: nil,
+            state: .idle,
+            lastActivityAt: Date(timeIntervalSince1970: 1_000),
+            title: nil,
+            pid: nil
+        )
+    }
+
+    private static func sha256Hex(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     @Test("returns the newest transcript when nothing is claimed")
@@ -118,5 +138,50 @@ import Testing
 
         let resolver = AgentChatTranscriptResolver(homeDirectory: home)
         #expect(resolver.newestClaudeTranscript(workingDirectory: bareCwd)?.sessionID == "priv-sess")
+    }
+
+    @Test("Antigravity fallback finds current nested Gemini JSONL by sessionId")
+    func antigravityCurrentGeminiNestedJSONL() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory
+            .appendingPathComponent("agentchat-resolver-agy-gemini-\(UUID().uuidString)", isDirectory: true)
+        let cwd = home.appendingPathComponent("brief2dev", isDirectory: true)
+        try fm.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let transcript = home
+            .appendingPathComponent(".gemini", isDirectory: true)
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent("brief2dev", isDirectory: true)
+            .appendingPathComponent("chats", isDirectory: true)
+            .appendingPathComponent("8a211dfc-80b1-4a68-a4a5-2486fa6f3beb", isDirectory: true)
+            .appendingPathComponent("eriepr.jsonl", isDirectory: false)
+        try fm.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"sessionId":"eriepr","projectHash":"project-hash"}"#.utf8).write(to: transcript)
+
+        let resolver = AgentChatTranscriptResolver(homeDirectory: home)
+        let record = Self.antigravityRecord(sessionID: "eriepr", cwd: cwd.path)
+
+        #expect(resolver.transcriptPath(for: record) == transcript.path)
+    }
+
+    @Test("Antigravity fallback finds older hash JSONL by top-level sessionId")
+    func antigravityHashJSONL() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory
+            .appendingPathComponent("agentchat-resolver-agy-hash-\(UUID().uuidString)", isDirectory: true)
+        let cwd = home.appendingPathComponent("proj-old", isDirectory: true)
+        try fm.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let transcript = home
+            .appendingPathComponent(".antigravity", isDirectory: true)
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent(Self.sha256Hex(cwd.path), isDirectory: true)
+            .appendingPathComponent("chats", isDirectory: true)
+            .appendingPathComponent("session-2026-05-06T10-00-keepme.jsonl", isDirectory: false)
+        try fm.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"sessionId":"native-session-123","role":"event","name":"session_metadata"}"#.utf8).write(to: transcript)
+
+        let resolver = AgentChatTranscriptResolver(homeDirectory: home)
+        let record = Self.antigravityRecord(sessionID: "native-session-123", cwd: cwd.path)
+
+        #expect(resolver.transcriptPath(for: record) == transcript.path)
     }
 }

@@ -1,4 +1,5 @@
 import CmuxAgentChat
+import CryptoKit
 import Foundation
 
 /// Resolves the transcript JSONL path for an agent session.
@@ -36,7 +37,7 @@ struct AgentChatTranscriptResolver {
         case .codex:
             return codexFallbackPath(sessionID: record.sessionID)
         case .antigravity:
-            return nil
+            return antigravityFallbackPath(record: record)
         case .other:
             return nil
         }
@@ -181,6 +182,130 @@ struct AgentChatTranscriptResolver {
             }
         }
         return nil
+    }
+
+    /// Antigravity's current `agy` JSONL files live under
+    /// `~/.gemini/tmp/<workspace-name>/chats/`, while older builds used a
+    /// hash bucket under `~/.antigravity/tmp/<sha256(cwd)>/chats/`. Restrict
+    /// fallback discovery to those cwd-derived directories so a stale session
+    /// id cannot accidentally bind to an unrelated Antigravity transcript.
+    private func antigravityFallbackPath(record: AgentChatSessionRecord) -> String? {
+        guard let cwd = record.workingDirectory,
+              !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let sessionID = record.sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionID.isEmpty else { return nil }
+
+        var matches: [(url: URL, date: Date)] = []
+        for dir in antigravityCandidateChatDirs(workingDirectory: cwd) {
+            guard let enumerator = fileManager.enumerator(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                guard isAntigravityJSONLTranscript(url),
+                      antigravityTranscript(url, matchesSessionID: sessionID) else {
+                    continue
+                }
+                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    ?? .distantPast
+                matches.append((url, date))
+            }
+        }
+        return matches.max { $0.date < $1.date }?.url.path
+    }
+
+    private func antigravityCandidateChatDirs(workingDirectory: String) -> [URL] {
+        var bucketNames: [String] = []
+        var seenBuckets = Set<String>()
+        func addBucket(_ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seenBuckets.insert(trimmed).inserted else { return }
+            bucketNames.append(trimmed)
+        }
+
+        for cwd in Self.cwdCandidates(workingDirectory) {
+            let basename = URL(fileURLWithPath: cwd).lastPathComponent
+            addBucket(basename)
+            addBucket(Self.sha256Hex(cwd))
+        }
+
+        var result: [URL] = []
+        var seenPaths = Set<String>()
+        for rootName in [".gemini", ".antigravity"] {
+            for bucket in bucketNames {
+                let dir = homeDirectory
+                    .appendingPathComponent(rootName, isDirectory: true)
+                    .appendingPathComponent("tmp", isDirectory: true)
+                    .appendingPathComponent(bucket, isDirectory: true)
+                    .appendingPathComponent("chats", isDirectory: true)
+                guard seenPaths.insert(dir.path).inserted else { continue }
+                result.append(dir)
+            }
+        }
+        return result
+    }
+
+    private func isAntigravityJSONLTranscript(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return url.pathExtension == "jsonl" && !name.hasPrefix("__pending__")
+    }
+
+    private func antigravityTranscript(_ url: URL, matchesSessionID sessionID: String) -> Bool {
+        let needle = sessionID.lowercased()
+        let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+        if stem == needle || stem.contains(needle) {
+            return true
+        }
+        return antigravitySessionID(inJSONL: url)?.lowercased() == needle
+    }
+
+    private func antigravitySessionID(inJSONL url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: 65_536)) ?? Data()
+        guard !data.isEmpty else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if let id = Self.sessionIDField(in: String(line)) {
+                return id
+            }
+        }
+        return nil
+    }
+
+    private static func sessionIDField(in text: String) -> String? {
+        for key in [#""sessionId""#, #""session_id""#] {
+            guard let keyRange = text.range(of: key) else { continue }
+            let afterKey = text[keyRange.upperBound...]
+            guard let colon = afterKey.firstIndex(of: ":") else { continue }
+            var cursor = afterKey.index(after: colon)
+            while cursor < afterKey.endIndex, afterKey[cursor].isWhitespace {
+                cursor = afterKey.index(after: cursor)
+            }
+            guard cursor < afterKey.endIndex, afterKey[cursor] == "\"" else { continue }
+            cursor = afterKey.index(after: cursor)
+            let valueStart = cursor
+            var escaped = false
+            while cursor < afterKey.endIndex {
+                let character = afterKey[cursor]
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    return String(afterKey[valueStart..<cursor])
+                }
+                cursor = afterKey.index(after: cursor)
+            }
+        }
+        return nil
+    }
+
+    private static func sha256Hex(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func normalizedClaudeTitle(_ title: String?) -> String? {
