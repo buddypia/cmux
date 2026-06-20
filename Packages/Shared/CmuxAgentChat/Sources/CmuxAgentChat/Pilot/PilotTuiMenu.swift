@@ -1,12 +1,61 @@
 import Foundation
 
 /// A `surface.send_key` token that can be sent to a terminal-backed agent UI.
-public enum PilotTuiKey: String, Sendable, Equatable, Codable {
-    case down
+public enum PilotTuiKey: String, Sendable, Equatable, Codable, CaseIterable {
     case up
+    case down
+    case left
+    case right
     case enter
     case escape
-    case right
+    case tab
+    case backspace
+    case digit0 = "0"
+    case digit1 = "1"
+    case digit2 = "2"
+    case digit3 = "3"
+    case digit4 = "4"
+    case digit5 = "5"
+    case digit6 = "6"
+    case digit7 = "7"
+    case digit8 = "8"
+    case digit9 = "9"
+}
+
+/// Options for reading trailing visible text from a terminal surface.
+public struct PilotTuiSurfaceReadOptions: Sendable, Equatable {
+    /// Number of trailing screen lines to read.
+    public let lines: Int
+
+    public init(lines: Int) {
+        self.lines = lines
+    }
+}
+
+/// A user-visible notification emitted while Pilot Mode is running.
+public struct PilotTuiSurfaceNotification: Sendable, Equatable {
+    public let title: String
+    public let body: String
+
+    public init(title: String, body: String) {
+        self.title = title
+        self.body = body
+    }
+}
+
+/// Backend-neutral surface operations required by a Pilot TUI decision loop.
+public protocol PilotTuiSurfaceDriving: Sendable {
+    /// Reads a terminal screen snapshot.
+    func readScreen(options: PilotTuiSurfaceReadOptions) async throws -> String
+
+    /// Sends one canonical key token.
+    func sendKey(_ key: PilotTuiKey) async throws
+
+    /// Sends arbitrary text to the surface.
+    func sendText(_ text: String) async throws
+
+    /// Emits a user-visible Pilot notification.
+    func notify(_ notification: PilotTuiSurfaceNotification) async throws
 }
 
 /// A numbered option rendered by a terminal selection menu.

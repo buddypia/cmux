@@ -137,6 +137,47 @@ struct PilotTuiMenuParserTests {
         #expect(PilotTuiMenuParser.keysToSubmit() == [.right, .enter])
     }
 
+    @Test("surface key alphabet mirrors the backend-neutral Pilot contract")
+    func surfaceKeyAlphabet() {
+        #expect(PilotTuiKey.allCases.map(\.rawValue) == [
+            "up",
+            "down",
+            "left",
+            "right",
+            "enter",
+            "escape",
+            "tab",
+            "backspace",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+        ])
+    }
+
+    @Test("surface driver contract is implementable by async backends")
+    func surfaceDriverContract() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: "screen")
+        let text = try await driver.readScreen(options: PilotTuiSurfaceReadOptions(lines: 120))
+        try await driver.sendKey(.enter)
+        try await driver.sendText("continue\n")
+        try await driver.notify(PilotTuiSurfaceNotification(title: "Pilot Mode", body: "sent"))
+
+        #expect(text == "screen")
+        #expect(driver.readLineCounts == [120])
+        #expect(driver.keys == [.enter])
+        #expect(driver.sentTexts == ["continue\n"])
+        #expect(driver.notifications == [
+            PilotTuiSurfaceNotification(title: "Pilot Mode", body: "sent"),
+        ])
+    }
+
     @Test("planning skips unsafe targets and escapes low-confidence guesses")
     func planningSafety() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))
@@ -195,5 +236,34 @@ struct PilotTuiMenuParserTests {
             Issue.record("expected custom threshold to allow selection")
             return
         }
+    }
+}
+
+private final class RecordingPilotSurfaceDriver: PilotTuiSurfaceDriving, @unchecked Sendable {
+    private let screen: String
+    private(set) var readLineCounts: [Int] = []
+    private(set) var keys: [PilotTuiKey] = []
+    private(set) var sentTexts: [String] = []
+    private(set) var notifications: [PilotTuiSurfaceNotification] = []
+
+    init(screen: String) {
+        self.screen = screen
+    }
+
+    func readScreen(options: PilotTuiSurfaceReadOptions) async throws -> String {
+        readLineCounts.append(options.lines)
+        return screen
+    }
+
+    func sendKey(_ key: PilotTuiKey) async throws {
+        keys.append(key)
+    }
+
+    func sendText(_ text: String) async throws {
+        sentTexts.append(text)
+    }
+
+    func notify(_ notification: PilotTuiSurfaceNotification) async throws {
+        notifications.append(notification)
     }
 }
