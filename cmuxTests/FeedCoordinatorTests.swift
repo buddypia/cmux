@@ -400,6 +400,61 @@ struct FeedCoordinatorTests {
         #expect(CodexTeamsApprovalBridge.permissionMode(fromFeedPushResponse: ["status": "timed_out"]) == nil)
     }
 
+    @Test func feedRequestIdKeepsAntigravityToolCallIdentifiers() {
+        let cli = CMUXCLI(args: [])
+
+        #expect(
+            cli.feedRequestId(
+                rawObject: [
+                    "toolCallId": "antigravity-call-010",
+                    "name": "tool_authorization_required",
+                ],
+                source: "antigravity",
+                sessionId: "session-1",
+                rawEvent: "tool_authorization_required",
+                toolName: "run_shell_command",
+                timestampMilliseconds: 123
+            ) == "antigravity-call-010"
+        )
+        #expect(
+            cli.feedRequestId(
+                rawObject: [
+                    "tool_call_id": "antigravity-call-011",
+                    "name": "tool_authorization_result",
+                ],
+                source: "antigravity",
+                sessionId: "session-1",
+                rawEvent: "tool_authorization_result",
+                toolName: "run_shell_command",
+                timestampMilliseconds: 123
+            ) == "antigravity-call-011"
+        )
+        #expect(
+            cli.feedRequestId(
+                rawObject: [
+                    "toolCall": [
+                        "id": "nested-call-1",
+                    ],
+                ],
+                source: "antigravity",
+                sessionId: "session-1",
+                rawEvent: "tool_authorization_required",
+                toolName: "run_shell_command",
+                timestampMilliseconds: 123
+            ) == "nested-call-1"
+        )
+        #expect(
+            cli.feedRequestId(
+                rawObject: [:],
+                source: "antigravity",
+                sessionId: "session-1",
+                rawEvent: "tool_authorization_required",
+                toolName: "run_shell_command",
+                timestampMilliseconds: 123
+            ) == "antigravity-session-1-tool_authorization_required-run_shell_command-123"
+        )
+    }
+
     @Test func codexApprovalItemSnapshotStripsLargePayloads() throws {
         let snapshot = CodexTeamsApprovalBridge.approvalItemSnapshot([
             "id": "call-1",

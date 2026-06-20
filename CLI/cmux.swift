@@ -32867,9 +32867,13 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
             hookEventName: hookEventName,
             promptText: promptText
         )
-        let requestId = stdinObj["_opencode_request_id"] as? String
-            ?? firstString(in: stdinObj, keys: ["request_id", "tool_use_id", "toolUseID"])
-            ?? "\(source)-\(sessionId)-\(rawEvent)-\(toolName)-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let requestId = feedRequestId(
+            rawObject: stdinObj,
+            source: source,
+            sessionId: sessionId,
+            rawEvent: rawEvent,
+            toolName: toolName
+        )
         eventDict["_opencode_request_id"] = requestId
 
         // Sync. For actionable events we block up to 120s waiting
@@ -32975,6 +32979,32 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
             return
         }
         print("{}")
+    }
+
+    func feedRequestId(
+        rawObject: [String: Any],
+        source: String,
+        sessionId: String,
+        rawEvent: String,
+        toolName: String,
+        timestampMilliseconds: Int = Int(Date().timeIntervalSince1970 * 1000)
+    ) -> String {
+        if let explicit = firstString(in: rawObject, keys: ["_opencode_request_id"]) {
+            return explicit
+        }
+        if let direct = firstString(in: rawObject, keys: [
+            "request_id", "requestId", "toolCallId", "tool_call_id",
+            "tool_use_id", "toolUseID", "call_id", "callId",
+        ]) {
+            return direct
+        }
+        if let toolCall = rawObject["toolCall"] as? [String: Any],
+           let nested = firstString(in: toolCall, keys: [
+                "id", "toolCallId", "tool_call_id", "call_id", "callId",
+           ]) {
+            return nested
+        }
+        return "\(source)-\(sessionId)-\(rawEvent)-\(toolName)-\(timestampMilliseconds)"
     }
 
     private static func shouldSuppressKiroFeedEvent(
