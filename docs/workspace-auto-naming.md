@@ -35,7 +35,7 @@ Auto-naming currently has source adapters for these agents. Unless noted otherwi
 - Grok: reads Grok's `chat_history.jsonl` for the active session and summarizes with `grok --prompt-file` with tools and web search disabled.
 - OpenCode: caches recent prompt/assistant text from the cmux OpenCode session plugin and summarizes with `opencode run --pure` from an isolated temporary directory.
 - Pi and OMP: cache prompt/assistant text from their cmux hooks and summarize with their own non-interactive CLIs (`pi --print --no-tools` and `omp --print --no-tools`).
-- Antigravity: reads the active `agy` JSONL transcript from the hook-provided `transcriptPath`, with fallback discovery for `~/.gemini/tmp/<workspace>/chats` and older `~/.antigravity/tmp/<sha256(cwd)>/chats` layouts. Antigravity itself is not used as a summarizer yet; choose a supported naming agent override (Claude Code, Codex, Grok, OpenCode, Pi, or OMP) if you want Antigravity sessions to rename today.
+- Antigravity: reads the active `agy` transcript from the hook-provided `transcriptPath`, supporting both JSONL rows and newer single-object `.json` files, with fallback discovery for `~/.gemini/tmp/<workspace>/chats` and older `~/.antigravity/tmp/<sha256(cwd)>/chats` layouts. Antigravity itself is not used as a summarizer yet; choose a supported naming agent override (Claude Code, Codex, Grok, OpenCode, Pi, or OMP) if you want Antigravity sessions to rename today.
 
 The other hook integrations are intentionally skipped for now:
 

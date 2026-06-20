@@ -349,7 +349,7 @@ struct AutoNamingEngine: Sendable {
         return count * config.minLineGrowth
     }
 
-    // MARK: - Transcript extraction (Antigravity JSONL)
+    // MARK: - Transcript extraction (Antigravity JSON/JSONL)
 
     /// Extracts user/assistant prose from Antigravity's current `agy` JSONL
     /// rows and the older role/parts message shape. Tool calls, permissions,
@@ -361,18 +361,25 @@ struct AutoNamingEngine: Sendable {
                   let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
                 continue
             }
+            appendAntigravityRecord(object, to: &messages)
+        }
+        return messages
+    }
 
-            if appendCurrentAntigravityMessage(object, to: &messages) {
-                continue
+    /// Extracts user/assistant prose from Antigravity's newer single-object
+    /// `.json` transcript shape (`{ sessionId, projectHash, messages: [...] }`).
+    func extractAntigravityMessages(fromTranscriptObject object: [String: Any]) -> [AutoNamingTranscriptMessage] {
+        var messages: [AutoNamingTranscriptMessage] = []
+        if let rows = object["messages"] as? [[String: Any]] {
+            for row in rows {
+                appendAntigravityRecord(row, to: &messages)
             }
-            if appendAntigravityRolePartsMessage(object, to: &messages) {
-                continue
+        } else if let rows = object["conversation"] as? [[String: Any]] {
+            for row in rows {
+                appendAntigravityRecord(row, to: &messages)
             }
-            if let nested = object["message"] as? [String: Any],
-               appendLooseAntigravityMessage(nested, to: &messages) {
-                continue
-            }
-            _ = appendLooseAntigravityMessage(object, to: &messages)
+        } else {
+            appendAntigravityRecord(object, to: &messages)
         }
         return messages
     }
@@ -467,6 +474,23 @@ struct AutoNamingEngine: Sendable {
         default:
             return false
         }
+    }
+
+    private func appendAntigravityRecord(
+        _ object: [String: Any],
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) {
+        if appendCurrentAntigravityMessage(object, to: &messages) {
+            return
+        }
+        if appendAntigravityRolePartsMessage(object, to: &messages) {
+            return
+        }
+        if let nested = object["message"] as? [String: Any],
+           appendLooseAntigravityMessage(nested, to: &messages) {
+            return
+        }
+        _ = appendLooseAntigravityMessage(object, to: &messages)
     }
 
     private func appendAntigravityRolePartsMessage(

@@ -163,4 +163,37 @@ import Testing
         let context = engine.buildContext(from: messages)
         #expect(context?.contains("Fix Antigravity stop notifications") == true)
     }
+
+    @Test func extractsMessagesFromSingleObjectJsonTranscript() {
+        let transcript: [String: Any] = [
+            "sessionId": "agy-json-session",
+            "projectHash": "project-hash",
+            "messages": [
+                [
+                    "type": "user",
+                    "content": "<permissions>workspace-write</permissions>",
+                ],
+                [
+                    "type": "user",
+                    "content": "Make Antigravity JSON sessions auto-name",
+                ],
+                [
+                    "type": "gemini",
+                    "content": "I will add whole-file transcript support.",
+                    "toolCalls": [["name": "read_file"]],
+                ],
+                [
+                    "role": "model",
+                    "parts": [["text": "The parser now reads both formats."]],
+                ],
+            ],
+        ]
+
+        let messages = engine.extractAntigravityMessages(fromTranscriptObject: transcript)
+        #expect(messages == [
+            AutoNamingTranscriptMessage(role: "user", text: "Make Antigravity JSON sessions auto-name"),
+            AutoNamingTranscriptMessage(role: "assistant", text: "I will add whole-file transcript support."),
+            AutoNamingTranscriptMessage(role: "assistant", text: "The parser now reads both formats."),
+        ])
+    }
 }

@@ -58,7 +58,7 @@ The same recorded Antigravity `transcriptPath` is used by agent chat: cmux tails
 
 ## Workspace auto-naming
 
-When the opt-in `automation.workspaceAutoNaming` setting is enabled, turn-end hooks also drive AI naming of workspaces and tabs. Supported adapters are Claude Code, Codex, Grok, OpenCode, Pi, and OMP; each adapter gates on the live setting over the socket, reuses the session store above for throttle state, summarizes with that agent's own CLI in a no-tools or isolated headless mode, and never overwrites a name the user set. Gemini, Amp, Cursor, Antigravity, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder are skipped until they have both a verified conversation source and a safe cheap non-interactive summarizer runner. See [workspace-auto-naming.md](workspace-auto-naming.md).
+When the opt-in `automation.workspaceAutoNaming` setting is enabled, turn-end hooks also drive AI naming of workspaces and tabs. Supported source adapters are Claude Code, Codex, Grok, OpenCode, Pi, OMP, and Antigravity; each adapter gates on the live setting over the socket, reuses the session store above for throttle state, and never overwrites a name the user set. Claude Code, Codex, Grok, OpenCode, Pi, and OMP summarize with safe no-tools or isolated headless invocations. Antigravity currently reads JSONL and single-object `.json` transcripts but requires a supported naming-agent override because a safe native `agy` summarizer invocation has not been verified. Gemini, Amp, Cursor, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder are skipped until they have both a verified conversation source and a safe cheap non-interactive summarizer runner. See [workspace-auto-naming.md](workspace-auto-naming.md).
 
 ## Agent Hibernation
 

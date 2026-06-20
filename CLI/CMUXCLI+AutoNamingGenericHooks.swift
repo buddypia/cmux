@@ -91,14 +91,25 @@ extension CMUXCLI {
                 let transcriptPath = normalizedHookValue(optionValue(commandArgs, name: "--transcript"))
                     ?? normalizedHookValue(mapped?.transcriptPath)
                     ?? findAntigravityTranscriptPath(sessionId: sessionId, cwd: cwd, env: env)
-                guard let transcriptPath,
-                      let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024),
-                      !lines.isEmpty else {
+                guard let transcriptPath else {
                     return nil
                 }
+                let messages: [AutoNamingTranscriptMessage]
+                if URL(fileURLWithPath: transcriptPath).pathExtension == "json" {
+                    guard let object = readAntigravityJSONTranscript(path: transcriptPath) else {
+                        return nil
+                    }
+                    messages = engine.extractAntigravityMessages(fromTranscriptObject: object)
+                } else {
+                    guard let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024),
+                          !lines.isEmpty else {
+                        return nil
+                    }
+                    messages = engine.extractAntigravityMessages(fromTranscriptLines: lines)
+                }
                 return (
-                    engine.extractAntigravityMessages(fromTranscriptLines: lines),
-                    textFileGrowthMetric(path: transcriptPath, fallbackLineCount: lines.count)
+                    messages,
+                    textFileGrowthMetric(path: transcriptPath, fallbackLineCount: messages.count)
                 )
             case .codexRollout:
                 return nil
@@ -302,7 +313,7 @@ extension CMUXCLI {
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard isAntigravityJSONLTranscript(url),
+                guard isAntigravityTranscriptFile(url),
                       antigravityTranscript(url, matchesSessionId: normalizedSessionId) else {
                     continue
                 }
@@ -312,6 +323,28 @@ extension CMUXCLI {
             }
         }
         return matches.max { $0.date < $1.date }?.url.path
+    }
+
+    private func readAntigravityJSONTranscript(
+        path: String,
+        maxBytes: UInt64 = 16 * 1024 * 1024
+    ) -> [String: Any]? {
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: expandedPath)) else {
+            return nil
+        }
+        defer { try? handle.close() }
+        do {
+            let size = try handle.seekToEnd()
+            guard size <= maxBytes else { return nil }
+            try handle.seek(toOffset: 0)
+            guard let data = try handle.readToEnd(), !data.isEmpty else {
+                return nil
+            }
+            return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        } catch {
+            return nil
+        }
     }
 
     private func antigravityCandidateChatDirs(homeURL: URL, cwd: String) -> [URL] {
@@ -363,9 +396,9 @@ extension CMUXCLI {
         return result
     }
 
-    private func isAntigravityJSONLTranscript(_ url: URL) -> Bool {
+    private func isAntigravityTranscriptFile(_ url: URL) -> Bool {
         let name = url.lastPathComponent
-        return url.pathExtension == "jsonl" && !name.hasPrefix("__pending__")
+        return (url.pathExtension == "jsonl" || url.pathExtension == "json") && !name.hasPrefix("__pending__")
     }
 
     private func antigravityTranscript(_ url: URL, matchesSessionId sessionId: String) -> Bool {
@@ -374,10 +407,10 @@ extension CMUXCLI {
         if stem == needle || stem.contains(needle) {
             return true
         }
-        return antigravitySessionId(inJSONL: url)?.lowercased() == needle
+        return antigravitySessionId(inTranscript: url)?.lowercased() == needle
     }
 
-    private func antigravitySessionId(inJSONL url: URL) -> String? {
+    private func antigravitySessionId(inTranscript url: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let data = (try? handle.read(upToCount: 65_536)) ?? Data()
