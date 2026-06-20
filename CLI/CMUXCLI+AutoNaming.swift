@@ -151,6 +151,12 @@ struct AutoNamingEnvironmentPolicy: Sendable {
 /// Pure auto-naming logic: throttle decisions, transcript extraction,
 /// prompt construction, and response sanitization.
 struct AutoNamingEngine: Sendable {
+    private static let antigravityUserNoisePrefixes = [
+        "<environment_context",
+        "<permissions",
+        "# AGENTS.md instructions",
+    ]
+
     var config: AutoNamingConfig
 
     init(config: AutoNamingConfig = AutoNamingConfig()) {
@@ -343,6 +349,34 @@ struct AutoNamingEngine: Sendable {
         return count * config.minLineGrowth
     }
 
+    // MARK: - Transcript extraction (Antigravity JSONL)
+
+    /// Extracts user/assistant prose from Antigravity's current `agy` JSONL
+    /// rows and the older role/parts message shape. Tool calls, permissions,
+    /// lifecycle rows, and injected environment blocks are skipped.
+    func extractAntigravityMessages(fromTranscriptLines lines: [String]) -> [AutoNamingTranscriptMessage] {
+        var messages: [AutoNamingTranscriptMessage] = []
+        for line in lines {
+            guard let data = line.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                continue
+            }
+
+            if appendCurrentAntigravityMessage(object, to: &messages) {
+                continue
+            }
+            if appendAntigravityRolePartsMessage(object, to: &messages) {
+                continue
+            }
+            if let nested = object["message"] as? [String: Any],
+               appendLooseAntigravityMessage(nested, to: &messages) {
+                continue
+            }
+            _ = appendLooseAntigravityMessage(object, to: &messages)
+        }
+        return messages
+    }
+
     // MARK: - Prompt and response
 
     func buildPrompt(currentTitle: String?, context: String) -> String {
@@ -414,6 +448,93 @@ struct AutoNamingEngine: Sendable {
             return
         }
         messages.append(AutoNamingTranscriptMessage(role: role, text: text))
+    }
+
+    private func appendCurrentAntigravityMessage(
+        _ object: [String: Any],
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) -> Bool {
+        guard let type = firstString(in: object, keys: ["type", "kind"])?.lowercased() else {
+            return false
+        }
+        switch type {
+        case "user":
+            appendAntigravityMessage(role: "user", text: firstTextValue(object["content"]), to: &messages)
+            return true
+        case "gemini":
+            appendAntigravityMessage(role: "assistant", text: firstTextValue(object["content"]), to: &messages)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func appendAntigravityRolePartsMessage(
+        _ object: [String: Any],
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) -> Bool {
+        guard let role = firstString(in: object, keys: ["role"])?.lowercased(),
+              object["parts"] != nil else {
+            return false
+        }
+        switch role {
+        case "user":
+            appendAntigravityMessage(role: "user", text: firstTextValue(object["parts"]), to: &messages)
+            return true
+        case "model", "assistant", "agent":
+            appendAntigravityMessage(role: "assistant", text: firstTextValue(object["parts"]), to: &messages)
+            return true
+        case "tool", "event":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func appendLooseAntigravityMessage(
+        _ object: [String: Any],
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) -> Bool {
+        guard let rawRole = firstString(in: object, keys: ["role", "author", "speaker", "type", "kind"]),
+              let role = normalizedAntigravityRole(rawRole) else {
+            return false
+        }
+        appendAntigravityMessage(role: role, text: firstText(in: object, keys: [
+            "content", "text", "body", "summary",
+            "assistant_response", "assistantResponse",
+            "last_assistant_message", "lastAssistantMessage",
+        ]), to: &messages)
+        return true
+    }
+
+    private func appendAntigravityMessage(
+        role: String,
+        text: String?,
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else {
+            return
+        }
+        if role == "user",
+           Self.antigravityUserNoisePrefixes.contains(where: { text.hasPrefix($0) }) {
+            return
+        }
+        if messages.last == AutoNamingTranscriptMessage(role: role, text: text) {
+            return
+        }
+        messages.append(AutoNamingTranscriptMessage(role: role, text: text))
+    }
+
+    private func normalizedAntigravityRole(_ rawRole: String) -> String? {
+        switch rawRole.lowercased() {
+        case "user", "human":
+            return "user"
+        case "assistant", "agent", "model", "gemini", "assistant_message", "agent_message", "model_message":
+            return "assistant"
+        default:
+            return nil
+        }
     }
 
     private func hookUserText(in object: [String: Any]) -> String? {

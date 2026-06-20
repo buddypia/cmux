@@ -1,7 +1,9 @@
+import CryptoKit
 import Foundation
 
 extension CMUXCLI {
     enum AgentAutoNamingSource: Equatable {
+        case antigravityTranscript
         case codexRollout
         case grokHistory
         case hookMessageCache
@@ -11,6 +13,8 @@ extension CMUXCLI {
         switch def.name {
         case "codex":
             return .codexRollout
+        case "antigravity":
+            return .antigravityTranscript
         case "grok":
             return .grokHistory
         case "opencode", "pi", "omp":
@@ -82,6 +86,20 @@ extension CMUXCLI {
         let engine = AutoNamingEngine()
         let sourceResult: (messages: [AutoNamingTranscriptMessage], lineCount: Int)? = {
             switch source {
+            case .antigravityTranscript:
+                let cwd = normalizedHookValue(optionValue(commandArgs, name: "--cwd")) ?? mapped?.cwd
+                let transcriptPath = normalizedHookValue(optionValue(commandArgs, name: "--transcript"))
+                    ?? normalizedHookValue(mapped?.transcriptPath)
+                    ?? findAntigravityTranscriptPath(sessionId: sessionId, cwd: cwd, env: env)
+                guard let transcriptPath,
+                      let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024),
+                      !lines.isEmpty else {
+                    return nil
+                }
+                return (
+                    engine.extractAntigravityMessages(fromTranscriptLines: lines),
+                    textFileGrowthMetric(path: transcriptPath, fallbackLineCount: lines.count)
+                )
             case .codexRollout:
                 return nil
             case .grokHistory:
@@ -129,6 +147,13 @@ extension CMUXCLI {
         ) { engine, outcome in
             guard let context = engine.buildContext(from: sourceResult.messages) else { return nil }
             let prompt = engine.buildPrompt(currentTitle: outcome.lastTitle, context: context)
+            if def.name == "antigravity", resolution.agent == "antigravity" {
+                telemetry.breadcrumb("antigravity-hook.auto-name.no-safe-summarizer")
+                if let missing = resolution.missingOverride {
+                    reportAutoNamingProblem("not_installed", agent: missing, workspaceId: workspaceId, client: client)
+                }
+                return nil
+            }
             guard let raw = summarize(
                 summarizerAgent: resolution.agent,
                 prompt: prompt,
@@ -253,6 +278,149 @@ extension CMUXCLI {
         if confirmedTitle != nil, let missing = missingOverride {
             reportAutoNamingProblem("not_installed", agent: missing, workspaceId: workspaceId, client: client)
         }
+    }
+
+    private func findAntigravityTranscriptPath(
+        sessionId: String,
+        cwd: String?,
+        env: [String: String]
+    ) -> String? {
+        let normalizedSessionId = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionId.isEmpty,
+              let cwd = cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !cwd.isEmpty else {
+            return nil
+        }
+        let home = normalizedHookValue(env["HOME"]) ?? NSHomeDirectory()
+        let homeURL = URL(fileURLWithPath: NSString(string: home).expandingTildeInPath, isDirectory: true)
+        let fileManager = FileManager.default
+        var matches: [(url: URL, date: Date)] = []
+        for dir in antigravityCandidateChatDirs(homeURL: homeURL, cwd: cwd) {
+            guard let enumerator = fileManager.enumerator(
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                guard isAntigravityJSONLTranscript(url),
+                      antigravityTranscript(url, matchesSessionId: normalizedSessionId) else {
+                    continue
+                }
+                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    ?? .distantPast
+                matches.append((url, date))
+            }
+        }
+        return matches.max { $0.date < $1.date }?.url.path
+    }
+
+    private func antigravityCandidateChatDirs(homeURL: URL, cwd: String) -> [URL] {
+        var bucketNames: [String] = []
+        var seenBuckets = Set<String>()
+        func addBucket(_ value: String) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seenBuckets.insert(trimmed).inserted else { return }
+            bucketNames.append(trimmed)
+        }
+
+        for candidate in antigravityCWDCandidates(cwd) {
+            addBucket(URL(fileURLWithPath: candidate).lastPathComponent)
+            addBucket(Self.sha256Hex(candidate))
+        }
+
+        var dirs: [URL] = []
+        var seenPaths = Set<String>()
+        for rootName in [".gemini", ".antigravity"] {
+            for bucket in bucketNames {
+                let dir = homeURL
+                    .appendingPathComponent(rootName, isDirectory: true)
+                    .appendingPathComponent("tmp", isDirectory: true)
+                    .appendingPathComponent(bucket, isDirectory: true)
+                    .appendingPathComponent("chats", isDirectory: true)
+                guard seenPaths.insert(dir.path).inserted else { continue }
+                dirs.append(dir)
+            }
+        }
+        return dirs
+    }
+
+    private func antigravityCWDCandidates(_ cwd: String) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+        func add(_ path: String) {
+            guard !path.isEmpty, seen.insert(path).inserted else { return }
+            result.append(path)
+        }
+        let privateRoot = "/private"
+        for base in [cwd, URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path] {
+            add(base)
+            if base.hasPrefix(privateRoot + "/") {
+                add(String(base.dropFirst(privateRoot.count)))
+            } else if base.hasPrefix("/") {
+                add(privateRoot + base)
+            }
+        }
+        return result
+    }
+
+    private func isAntigravityJSONLTranscript(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return url.pathExtension == "jsonl" && !name.hasPrefix("__pending__")
+    }
+
+    private func antigravityTranscript(_ url: URL, matchesSessionId sessionId: String) -> Bool {
+        let needle = sessionId.lowercased()
+        let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+        if stem == needle || stem.contains(needle) {
+            return true
+        }
+        return antigravitySessionId(inJSONL: url)?.lowercased() == needle
+    }
+
+    private func antigravitySessionId(inJSONL url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: 65_536)) ?? Data()
+        guard !data.isEmpty else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if let id = Self.sessionIdField(in: String(line)) {
+                return id
+            }
+        }
+        return nil
+    }
+
+    private static func sessionIdField(in text: String) -> String? {
+        for key in [#""sessionId""#, #""session_id""#] {
+            guard let keyRange = text.range(of: key) else { continue }
+            let afterKey = text[keyRange.upperBound...]
+            guard let colon = afterKey.firstIndex(of: ":") else { continue }
+            var cursor = afterKey.index(after: colon)
+            while cursor < afterKey.endIndex, afterKey[cursor].isWhitespace {
+                cursor = afterKey.index(after: cursor)
+            }
+            guard cursor < afterKey.endIndex, afterKey[cursor] == "\"" else { continue }
+            cursor = afterKey.index(after: cursor)
+            let valueStart = cursor
+            var escaped = false
+            while cursor < afterKey.endIndex {
+                let character = afterKey[cursor]
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    return String(afterKey[valueStart..<cursor])
+                }
+                cursor = afterKey.index(after: cursor)
+            }
+        }
+        return nil
+    }
+
+    private static func sha256Hex(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     func applyAutoNamingTitle(

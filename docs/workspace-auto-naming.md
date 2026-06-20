@@ -28,19 +28,20 @@ Custom titles carry a provenance marker (user vs auto):
 
 ## Supported adapters
 
-Auto-naming currently has source adapters and summarizer runners for:
+Auto-naming currently has source adapters for these agents. Unless noted otherwise, the same agent also has a safe summarizer runner:
 
 - Claude Code: reads the Claude transcript JSONL and summarizes with `claude -p`.
 - Codex: reads the Codex rollout JSONL and summarizes with `codex exec --output-last-message`.
 - Grok: reads Grok's `chat_history.jsonl` for the active session and summarizes with `grok --prompt-file` with tools and web search disabled.
 - OpenCode: caches recent prompt/assistant text from the cmux OpenCode session plugin and summarizes with `opencode run --pure` from an isolated temporary directory.
 - Pi and OMP: cache prompt/assistant text from their cmux hooks and summarize with their own non-interactive CLIs (`pi --print --no-tools` and `omp --print --no-tools`).
+- Antigravity: reads the active `agy` JSONL transcript from the hook-provided `transcriptPath`, with fallback discovery for `~/.gemini/tmp/<workspace>/chats` and older `~/.antigravity/tmp/<sha256(cwd)>/chats` layouts. Antigravity itself is not used as a summarizer yet; choose a supported naming agent override (Claude Code, Codex, Grok, OpenCode, Pi, or OMP) if you want Antigravity sessions to rename today.
 
 The other hook integrations are intentionally skipped for now:
 
 - Amp's current cmux plugin reports lifecycle/status but does not expose a usable prompt or assistant transcript.
 - Gemini has hook payload text, but the available non-interactive CLI invocation has not been verified to disable tools/project access, so it is skipped rather than running untrusted transcript text through a tool-capable summarizer.
-- Cursor, Antigravity, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder have cmux Stop/notification hooks, but this branch does not yet have both a verified transcript source and a safe cheap non-interactive summarizer invocation that disables tools/project access.
+- Cursor, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder have cmux Stop/notification hooks, but this branch does not yet have both a verified transcript source and a safe cheap non-interactive summarizer invocation that disables tools/project access.
 
 ## Mechanics
 
