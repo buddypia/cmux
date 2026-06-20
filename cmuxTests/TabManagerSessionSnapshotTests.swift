@@ -3067,6 +3067,39 @@ final class TabManagerSessionSnapshotTests: XCTestCase {
         XCTAssertNil(roundTrip.panels.first?.terminal?.remotePTYSessionID)
     }
 
+    func testSessionSnapshotRestoresDefaultFreestyleSSHDAsSelfHealingAttach() throws {
+        let snapshot = SessionRemoteWorkspaceSnapshot(
+            transport: .ssh,
+            destination: "nncop8f8h6w9blhns6sy+cmux@vm-ssh.freestyle.sh",
+            port: 22,
+            identityFile: nil,
+            sshOptions: [
+                "StrictHostKeyChecking=no",
+                "UserKnownHostsFile=/dev/null",
+                "LogLevel=ERROR",
+            ],
+            preserveAfterTerminalExit: true,
+            skipDaemonBootstrap: true,
+            relayPort: nil,
+            persistentDaemonSlot: "cmux-default-freestyle-sshd-v1"
+        )
+
+        let configuration = try XCTUnwrap(snapshot.workspaceConfiguration())
+        let terminalStartupCommand = try XCTUnwrap(configuration.terminalStartupCommand)
+
+        XCTAssertEqual(configuration.preserveAfterTerminalExit, true)
+        XCTAssertEqual(configuration.persistentDaemonSlot, "cmux-default-freestyle-sshd-v1")
+        XCTAssertEqual(configuration.skipDaemonBootstrap, true)
+        XCTAssertNil(configuration.relayPort)
+        XCTAssertNil(configuration.localSocketPath)
+        XCTAssertFalse(terminalStartupCommand.contains("ssh-pty-attach"), terminalStartupCommand)
+        XCTAssertFalse(terminalStartupCommand.contains("ssh -p 22"), terminalStartupCommand)
+        XCTAssertTrue(terminalStartupCommand.contains("vm ssh-attach"), terminalStartupCommand)
+        XCTAssertTrue(terminalStartupCommand.contains("--id nncop8f8h6w9blhns6sy"), terminalStartupCommand)
+        XCTAssertTrue(terminalStartupCommand.contains("--default-freestyle-sshd"), terminalStartupCommand)
+        XCTAssertTrue(terminalStartupCommand.contains("CMUX_SSH_RECONNECT_LIMIT"), terminalStartupCommand)
+    }
+
     func testSessionRemoteWorkspaceSnapshotRequiresPersistentDaemonSlotForPTYRestore() throws {
         let snapshot = SessionRemoteWorkspaceSnapshot(
             transport: .ssh,
