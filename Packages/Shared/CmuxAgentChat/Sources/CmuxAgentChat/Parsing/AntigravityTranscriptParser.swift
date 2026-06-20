@@ -3,10 +3,10 @@ import Foundation
 /// Converts Antigravity CLI transcript JSONL lines into ``ChatMessage`` values.
 ///
 /// Antigravity's hook contract exposes a `transcriptPath`, but its transcript
-/// rows are less formally documented than Claude/Codex. This parser therefore
-/// reads the stable semantic shapes cmux already receives from hooks: user and
-/// assistant/agent/model message rows, plus `PreToolUse`/`PostToolUse` tool
-/// lifecycle rows. Unknown rows fail open.
+/// rows have evolved across releases. This parser therefore reads the current
+/// `role`/`parts` JSONL shape plus the stable semantic shapes cmux already
+/// receives from hooks: user and assistant/agent/model message rows, plus
+/// `PreToolUse`/`PostToolUse` tool lifecycle rows. Unknown rows fail open.
 public struct AntigravityTranscriptParser: Sendable {
     private static let userNoisePrefixes = [
         "<environment_context",
@@ -14,10 +14,11 @@ public struct AntigravityTranscriptParser: Sendable {
         "# AGENTS.md instructions",
     ]
     private static let shellToolNames: Set<String> = [
-        "run_command", "execute_bash", "shell", "exec_command",
+        "run_command", "execute_bash", "shell", "exec_command", "run_shell_command",
     ]
     private static let summaryArgumentKeys = [
-        "path", "file_path", "pattern", "query", "url", "text", "command", "cmd",
+        "path", "file_path", "absolute_path", "relative_path", "file", "pattern",
+        "query", "url", "text", "command", "cmd",
     ]
 
     private let budget = TranscriptTextBudget()
@@ -52,6 +53,9 @@ public struct AntigravityTranscriptParser: Sendable {
                 lastTimestamp = stamped
             }
             let timestamp = lastTimestamp ?? Date(timeIntervalSince1970: 0)
+            if appendRolePartsRecord(root, seq: seq, timestamp: timestamp, into: &assembler) {
+                continue
+            }
             let event = normalizedEventName(firstString(in: root, keys: [
                 "hook_event_name", "hookEventName", "event_name", "eventName", "event", "type", "kind",
             ]))
@@ -140,6 +144,160 @@ public struct AntigravityTranscriptParser: Sendable {
     }
 
     // MARK: - Messages
+
+    private func appendRolePartsRecord(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) -> Bool {
+        guard let role = root["role"]?.string?.lowercased() else { return false }
+        if role == "event" {
+            appendRoleEvent(root, seq: seq, timestamp: timestamp, into: &assembler)
+            return true
+        }
+        guard let parts = root["parts"]?.array else { return false }
+        switch role {
+        case "user":
+            appendRoleUserParts(root, parts: parts, seq: seq, timestamp: timestamp, into: &assembler)
+            return true
+        case "model", "assistant", "agent":
+            appendRoleModelParts(root, parts: parts, seq: seq, timestamp: timestamp, into: &assembler)
+            return true
+        case "tool":
+            resolveRoleToolParts(root, parts: parts, into: &assembler)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func appendRoleEvent(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        switch normalizedEventName(firstString(in: root, keys: ["name", "event", "type", "kind"])) {
+        case "sessionmetadata":
+            appendSessionStart(root, seq: seq, timestamp: timestamp, into: &assembler)
+        case "toolauthorizationrequired", "permissionrequired":
+            appendPermissionRequest(root, seq: seq, timestamp: timestamp, into: &assembler)
+        case "turncomplete":
+            break
+        default:
+            break
+        }
+    }
+
+    private func appendRoleUserParts(
+        _ root: TranscriptJSONValue,
+        parts: [TranscriptJSONValue],
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        let text = parts
+            .compactMap { nonEmpty($0["text"]?.string) }
+            .joined(separator: " ")
+        guard !text.isEmpty,
+              !Self.userNoisePrefixes.contains(where: { text.hasPrefix($0) })
+        else { return }
+        assembler.append(
+            ChatMessage(
+                id: lineID(root, seq: seq),
+                seq: seq,
+                role: .user,
+                timestamp: timestamp,
+                kind: .prose(ChatProse(text: budget.body(text)))
+            )
+        )
+    }
+
+    private func appendRoleModelParts(
+        _ root: TranscriptJSONValue,
+        parts: [TranscriptJSONValue],
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        for (index, part) in parts.enumerated() {
+            if let thought = nonEmpty(part["thought"]?.string) {
+                assembler.append(
+                    ChatMessage(
+                        id: partLineID(root, seq: seq, label: "thought", index: index),
+                        seq: seq,
+                        role: .agent,
+                        timestamp: timestamp,
+                        kind: .thought(ChatThought(text: budget.body(thought)))
+                    )
+                )
+            } else if let text = nonEmpty(part["text"]?.string) {
+                assembler.append(
+                    ChatMessage(
+                        id: partLineID(root, seq: seq, label: "text", index: index),
+                        seq: seq,
+                        role: .agent,
+                        timestamp: timestamp,
+                        kind: .prose(ChatProse(text: budget.body(text)))
+                    )
+                )
+            } else if let call = part["functionCall"] {
+                appendToolInvocation(
+                    root: root,
+                    call: call,
+                    seq: seq,
+                    timestamp: timestamp,
+                    into: &assembler
+                )
+            }
+        }
+    }
+
+    private func resolveRoleToolParts(
+        _ root: TranscriptJSONValue,
+        parts: [TranscriptJSONValue],
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        for part in parts {
+            guard let response = part["functionResponse"],
+                  let callID = toolCallID(root: root, call: response)
+            else { continue }
+            let result = firstObject(in: response, keys: ["response", "result", "output"])
+            assembler.resolve(key: callID, completion: completion(from: result ?? response))
+        }
+    }
+
+    private func appendPermissionRequest(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        let callID = firstString(in: root, keys: [
+            "toolCallId", "tool_call_id", "requestId", "request_id", "id",
+        ])
+        let toolName = firstString(in: root, keys: ["toolName", "tool_name", "tool"])
+        let input = firstObject(in: root, keys: ["args", "arguments", "tool_input", "toolInput", "parameters"])
+        let subject = shellCommand(from: input)
+            ?? input.flatMap { nonEmpty($0.compactJSONString()) }
+            ?? toolName
+            ?? "Antigravity tool"
+        assembler.append(
+            ChatMessage(
+                id: callID ?? lineID(root, seq: seq),
+                seq: seq,
+                role: .system,
+                timestamp: timestamp,
+                kind: .permissionRequest(
+                    ChatPermissionRequest(
+                        title: "Antigravity needs approval:",
+                        subject: budget.summaryArgument(subject)
+                    )
+                )
+            )
+        )
+    }
 
     private func appendMessage(
         _ root: TranscriptJSONValue,
@@ -236,8 +394,24 @@ public struct AntigravityTranscriptParser: Sendable {
         timestamp: Date,
         into assembler: inout TranscriptBatchAssembler
     ) {
-        guard let call = toolCall(in: root),
-              let name = firstString(in: call, keys: ["name", "tool_name", "toolName", "tool"])
+        guard let call = toolCall(in: root) else { return }
+        appendToolInvocation(
+            root: root,
+            call: call,
+            seq: seq,
+            timestamp: timestamp,
+            into: &assembler
+        )
+    }
+
+    private func appendToolInvocation(
+        root: TranscriptJSONValue,
+        call: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let name = firstString(in: call, keys: ["name", "tool_name", "toolName", "tool"])
         else { return }
         let callID = toolCallID(root: root, call: call)
         let input = toolInput(root: root, call: call)
@@ -343,6 +517,7 @@ public struct AntigravityTranscriptParser: Sendable {
 
     private func completion(from value: TranscriptJSONValue) -> TranscriptToolCompletion {
         let text = firstString(in: value, keys: ["output", "result", "stdout", "stderr", "text", "message"])
+            ?? value["error"]?.string
             ?? value.string
         var exitCode = firstInt(in: value, keys: ["exit_code", "exitCode", "status"])
             ?? firstInt(in: value["metadata"], keys: ["exit_code", "exitCode"])
@@ -352,7 +527,10 @@ public struct AntigravityTranscriptParser: Sendable {
            let match = text.prefix(400).firstMatch(of: /(?:Process exited with code|Exit code:?|exited with code) (-?\d+)/) {
             exitCode = Int(match.1)
         }
-        let explicitError = value["is_error"]?.bool ?? value["isError"]?.bool ?? value["error"]?.bool
+        let explicitError = value["is_error"]?.bool
+            ?? value["isError"]?.bool
+            ?? value["error"]?.bool
+            ?? (value["error"] == nil ? nil : true)
         return TranscriptToolCompletion(
             output: text,
             isError: explicitError ?? ((exitCode ?? 0) != 0),
@@ -413,6 +591,10 @@ public struct AntigravityTranscriptParser: Sendable {
 
     private func lineID(_ root: TranscriptJSONValue, seq: Int) -> String {
         firstString(in: root, keys: ["uuid", "id", "messageId", "message_id"]) ?? "line-\(seq)"
+    }
+
+    private func partLineID(_ root: TranscriptJSONValue, seq: Int, label: String, index: Int) -> String {
+        "\(lineID(root, seq: seq))-\(label)-\(index)"
     }
 
     private func normalizedEventName(_ raw: String?) -> String {

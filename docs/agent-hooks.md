@@ -52,7 +52,7 @@ Grok uses its `Notification` hook for user-facing completion messages. cmux reco
 
 Antigravity uses native `Stop` payload text when present. When the payload only contains `transcriptPath`, cmux reads the recent JSONL transcript tail and uses the last assistant/agent/model message for the completion notification instead of falling back to a generic "session completed" body.
 
-The same recorded Antigravity `transcriptPath` is used by agent chat: cmux tails the JSONL file, renders user and assistant/agent/model prose, and pairs `PreToolUse`/`PostToolUse` rows into running/completed tool cards when those lifecycle rows are present.
+The same recorded Antigravity `transcriptPath` is used by agent chat: cmux tails the JSONL file, renders user and assistant/agent/model prose from current `role`/`parts` rows, pairs function calls/responses into running/completed tool cards, and surfaces `tool_authorization_required` rows as permission cards. Legacy `PreToolUse`/`PostToolUse` lifecycle rows remain supported.
 
 ## Workspace auto-naming
 

@@ -4,7 +4,8 @@ import Testing
 @testable import CmuxAgentChat
 
 /// Fixtures cover the Antigravity transcript shapes cmux observes through
-/// `transcriptPath`: loose JSONL message rows plus native hook lifecycle rows.
+/// `transcriptPath`: current role/parts JSONL rows, loose message rows, and
+/// native hook lifecycle rows.
 @Suite("AntigravityTranscriptParser")
 struct AntigravityTranscriptParserTests {
     private let parser = AntigravityTranscriptParser()
@@ -35,6 +36,143 @@ struct AntigravityTranscriptParserTests {
         object["hook_event_name"] = event
         object["timestamp"] = object["timestamp"] ?? "2026-06-20T06:31:01.000Z"
         return Self.json(object)
+    }
+
+    @Test("current role/parts JSONL maps a typical Antigravity turn")
+    func rolePartsTypicalTurn() {
+        let lines = [
+            Self.json([
+                "role": "event",
+                "name": "session_metadata",
+                "sessionId": "antigravity-session-001",
+                "cwd": "/workspace/test-project",
+                "cliVersion": "0.37.1",
+                "timestamp": "2026-04-10T10:00:00.000Z",
+            ]),
+            Self.json([
+                "role": "user",
+                "parts": [["text": "Read the file src/app.ts"]],
+                "timestamp": "2026-04-10T10:00:00.500Z",
+            ]),
+            Self.json([
+                "role": "model",
+                "parts": [
+                    [
+                        "functionCall": [
+                            "id": "antigravity-call-001",
+                            "name": "read_file",
+                            "args": ["absolute_path": "/workspace/test-project/src/app.ts"],
+                        ],
+                    ],
+                ],
+                "timestamp": "2026-04-10T10:00:01.000Z",
+            ]),
+            Self.json([
+                "role": "tool",
+                "parts": [
+                    [
+                        "functionResponse": [
+                            "id": "antigravity-call-001",
+                            "name": "read_file",
+                            "response": ["output": "const app = () => 'hello';"],
+                        ],
+                    ],
+                ],
+                "timestamp": "2026-04-10T10:00:01.500Z",
+            ]),
+            Self.json([
+                "role": "model",
+                "parts": [["text": "The file exports a simple function."]],
+                "timestamp": "2026-04-10T10:00:02.000Z",
+            ]),
+            Self.json([
+                "role": "event",
+                "name": "turn_complete",
+                "turnId": "gemini-turn-001",
+                "timestamp": "2026-04-10T10:00:02.100Z",
+            ]),
+        ]
+
+        let result = parser.parse(lines: lines, startingSeq: 0)
+
+        #expect(result.messages.count == 4)
+        #expect(result.messages[0].kind == .status(
+            ChatStatusTransition(event: .sessionStarted, detail: "/workspace/test-project")
+        ))
+        #expect(result.messages[1].role == .user)
+        #expect(result.messages[1].kind == .prose(ChatProse(text: "Read the file src/app.ts")))
+        guard case .toolUse(let tool) = result.messages[2].kind else {
+            Issue.record("expected role/parts functionCall to map to toolUse")
+            return
+        }
+        #expect(result.messages[2].id == "antigravity-call-001")
+        #expect(tool.toolName == "read_file")
+        #expect(tool.summary == "read_file /workspace/test-project/src/app.ts")
+        #expect(tool.output == "const app = () => 'hello';")
+        #expect(tool.status == .succeeded)
+        #expect(result.messages[3].role == .agent)
+        #expect(result.messages[3].kind == .prose(
+            ChatProse(text: "The file exports a simple function.")
+        ))
+    }
+
+    @Test("role/parts thought and functionCall parts emit in transcript order")
+    func rolePartsThoughtAndFunctionCall() {
+        let lines = [
+            Self.json([
+                "role": "model",
+                "parts": [
+                    ["thought": "Let me list the directory first."],
+                    [
+                        "functionCall": [
+                            "id": "antigravity-call-002",
+                            "name": "list_directory",
+                            "args": ["path": "/workspace/test-project"],
+                        ],
+                    ],
+                ],
+                "timestamp": "2026-04-10T10:01:01.000Z",
+            ]),
+        ]
+
+        let result = parser.parse(lines: lines, startingSeq: 7)
+
+        #expect(result.messages.count == 2)
+        #expect(result.messages[0].seq == 7)
+        #expect(result.messages[0].kind == .thought(
+            ChatThought(text: "Let me list the directory first.")
+        ))
+        guard case .toolUse(let tool) = result.messages[1].kind else {
+            Issue.record("expected role/parts functionCall to map to toolUse")
+            return
+        }
+        #expect(result.messages[1].id == "antigravity-call-002")
+        #expect(tool.toolName == "list_directory")
+        #expect(tool.summary == "list_directory /workspace/test-project")
+    }
+
+    @Test("role event tool authorization maps to a permission request")
+    func roleEventToolAuthorizationRequired() {
+        let line = Self.json([
+            "role": "event",
+            "name": "tool_authorization_required",
+            "toolCallId": "antigravity-call-010",
+            "toolName": "run_shell_command",
+            "args": ["command": "rm file.txt"],
+            "timestamp": "2026-04-10T10:02:00.000Z",
+        ])
+
+        let result = parser.parse(lines: [line], startingSeq: 12)
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == "antigravity-call-010")
+        #expect(result.messages[0].role == .system)
+        #expect(result.messages[0].kind == .permissionRequest(
+            ChatPermissionRequest(
+                title: "Antigravity needs approval:",
+                subject: "rm file.txt"
+            )
+        ))
     }
 
     @Test("user and assistant message rows map to prose and drop injected context")
