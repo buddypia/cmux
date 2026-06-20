@@ -56,6 +56,30 @@ struct PilotTuiMenuParserTests {
         "すべての項目を確認しました。",
     ].joined(separator: "\n")
 
+    private let shipStep = [
+        "下記の進路を選んでください:",
+        "────────────────────────────────────────",
+        "←  ☐ Ship可否  ☐ 60s閾値  ✔ Submit  →",
+        "",
+        "ship を進めますか？",
+        "",
+        "❯ 1. 進行",
+        "  2. とどまる",
+        "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ].joined(separator: "\n")
+
+    private let thresholdStep = [
+        "下記の進路を選んでください:",
+        "────────────────────────────────────────",
+        "←  ✔ Ship可否  ☐ 60s閾値  ✔ Submit  →",
+        "",
+        "60s 閾値を使いますか？",
+        "",
+        "❯ 1. 使う",
+        "  2. 使わない",
+        "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ].joined(separator: "\n")
+
     @Test("single-select menu parses the question, options, and cursor")
     func singleSelectMenu() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: single))
@@ -244,6 +268,61 @@ struct PilotTuiMenuParserTests {
         #expect(missing.keys.isEmpty)
     }
 
+    @Test("auto selector loop advances submit-bar menus through multiple steps")
+    func autoSelectorLoopSubmitsMultiStepForms() async throws {
+        let driver = RecordingPilotSurfaceDriver(screens: [shipStep, thresholdStep, preShipReady])
+        let decisions = PilotDecisionQueue([
+            PilotTuiDecision(optionNumber: 1, confidence: 0.92, reason: "ship"),
+            PilotTuiDecision(optionNumber: 2, confidence: 0.91, reason: "threshold"),
+        ])
+
+        let result = try await PilotTuiAutoSelector.runLoop(
+            driver: driver,
+            request: PilotTuiAutoSelectLoopRequest(settleDelayNanoseconds: 0),
+            decide: { _, _ in await decisions.next() },
+            sleep: { _ in }
+        )
+
+        #expect(result == .submitted(
+            keys: [.enter, .down, .enter, .right, .enter],
+            optionNumbers: [1, 2]
+        ))
+        #expect(driver.keys == [.enter, .down, .enter, .right, .enter])
+        #expect(driver.readLineCounts == [120, 120, 120])
+        #expect(await decisions.isEmpty())
+    }
+
+    @Test("auto selector loop stops stale submit-bar flows at the action limit")
+    func autoSelectorLoopStopsAtActionLimit() async throws {
+        let driver = RecordingPilotSurfaceDriver(screens: [shipStep, shipStep])
+        let result = try await PilotTuiAutoSelector.runLoop(
+            driver: driver,
+            request: PilotTuiAutoSelectLoopRequest(maxMenuActions: 1, settleDelayNanoseconds: 0),
+            decide: { _, _ in PilotTuiDecision(optionNumber: 1, confidence: 0.9, reason: "same") },
+            sleep: { _ in }
+        )
+
+        #expect(result == .skipped(
+            reason: "submit-bar action limit 1 reached",
+            keys: [.enter],
+            optionNumbers: [1]
+        ))
+        #expect(driver.keys == [.enter])
+    }
+
+    @Test("auto selector loop reports no menu before sending keys")
+    func autoSelectorLoopReportsNoMenu() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: "plain output")
+        let result = try await PilotTuiAutoSelector.runLoop(
+            driver: driver,
+            decide: { _, _ in PilotTuiDecision(optionNumber: 1, confidence: 1, reason: "unused") },
+            sleep: { _ in }
+        )
+
+        #expect(result == .noMenu)
+        #expect(driver.keys.isEmpty)
+    }
+
     @Test("planning skips unsafe targets and escapes low-confidence guesses")
     func planningSafety() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))
@@ -306,19 +385,26 @@ struct PilotTuiMenuParserTests {
 }
 
 private final class RecordingPilotSurfaceDriver: PilotTuiSurfaceDriving, @unchecked Sendable {
-    private let screen: String
+    private let screens: [String]
+    private var readIndex = 0
     private(set) var readLineCounts: [Int] = []
     private(set) var keys: [PilotTuiKey] = []
     private(set) var sentTexts: [String] = []
     private(set) var notifications: [PilotTuiSurfaceNotification] = []
 
     init(screen: String) {
-        self.screen = screen
+        self.screens = [screen]
+    }
+
+    init(screens: [String]) {
+        self.screens = screens
     }
 
     func readScreen(options: PilotTuiSurfaceReadOptions) async throws -> String {
         readLineCounts.append(options.lines)
-        return screen
+        let index = min(readIndex, screens.count - 1)
+        readIndex += 1
+        return screens[index]
     }
 
     func sendKey(_ key: PilotTuiKey) async throws {
@@ -331,5 +417,21 @@ private final class RecordingPilotSurfaceDriver: PilotTuiSurfaceDriving, @unchec
 
     func notify(_ notification: PilotTuiSurfaceNotification) async throws {
         notifications.append(notification)
+    }
+}
+
+private actor PilotDecisionQueue {
+    private var decisions: [PilotTuiDecision]
+
+    init(_ decisions: [PilotTuiDecision]) {
+        self.decisions = decisions
+    }
+
+    func next() -> PilotTuiDecision {
+        decisions.removeFirst()
+    }
+
+    func isEmpty() -> Bool {
+        decisions.isEmpty
     }
 }
