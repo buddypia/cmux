@@ -46,6 +46,31 @@ import Testing
     #expect(model.isViewingLiveBottom)
 }
 
+@Test func scxWrappedReplayCanReachOldestRetainedPhysicalRow() {
+    var model = MobileTerminalLocalScrollbackModel()
+    _ = model.applyMetadata(activeScreen: .primary, scrollbackRows: 5154)
+
+    let bounds = model.updateBounds(total: 5202, len: 48)
+    #expect(bounds.maxRowOffset == 5154)
+    #expect(bounds.rowOffset == 5154)
+    #expect(bounds.mirrorTruncated == false)
+
+    let scroll = model.applyGesture(rowDelta: 6000)
+    #expect(scroll.rowOffset == 0)
+    #expect(!model.isViewingLiveBottom)
+}
+
+@Test func scxWrappedReplayReportsOldTenMegabyteMirrorAsTruncated() {
+    var model = MobileTerminalLocalScrollbackModel()
+    _ = model.applyMetadata(activeScreen: .primary, scrollbackRows: 5154)
+
+    let bounds = model.updateBounds(total: 1682, len: 48)
+    #expect(bounds.expectedTotalRows == 5202)
+    #expect(bounds.mirrorTruncated)
+    #expect(bounds.maxRowOffset == 1634)
+    #expect(bounds.rowOffset == 1634)
+}
+
 @Test func alternateScreenResetsLocalScrollbackState() {
     var model = MobileTerminalLocalScrollbackModel()
     _ = model.applyMetadata(activeScreen: .primary, scrollbackRows: 100)
