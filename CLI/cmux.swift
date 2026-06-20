@@ -2771,13 +2771,13 @@ private final class CLIPilotRPCTransport: @unchecked Sendable {
         params: [String: PilotTuiRPCValue]
     ) async throws -> [String: PilotTuiRPCValue] {
         try await withCheckedThrowingContinuation { continuation in
-            queue.async { [client, responseTimeout] in
+            queue.async { [self] in
                 do {
                     let jsonParams = PilotTuiRPCValue.jsonObjectDictionary(from: params)
                     let response = try client.sendV2(
                         method: method,
                         params: jsonParams,
-                        responseTimeout: responseTimeout
+                        responseTimeout: self.responseTimeout
                     )
                     continuation.resume(returning: PilotTuiRPCValue.dictionary(from: response))
                 } catch {
@@ -3055,7 +3055,7 @@ struct CMUXCLI {
         _ operation: @escaping () async throws -> T
     ) throws -> T {
         let semaphore = DispatchSemaphore(value: 0)
-        let lock = NSLock()
+        let resultQueue = DispatchQueue(label: "com.cmux.cli.pilot-task-result")
         var result: Result<T, Error>?
 
         Task {
@@ -3065,16 +3065,14 @@ struct CMUXCLI {
             } catch {
                 taskResult = .failure(error)
             }
-            lock.lock()
-            result = taskResult
-            lock.unlock()
+            resultQueue.sync {
+                result = taskResult
+            }
             semaphore.signal()
         }
 
         semaphore.wait()
-        lock.lock()
-        let finalResult = result
-        lock.unlock()
+        let finalResult = resultQueue.sync { result }
         guard let finalResult else {
             throw CLIError(message: "pilot task did not return a result")
         }
@@ -3265,9 +3263,9 @@ struct CMUXCLI {
         let (confidenceArg, rem1) = parseOption(rem0, name: "--confidence")
         let (requiredConfidenceArg, rem2) = parseOption(rem1, name: "--required-confidence")
         let (linesArg, rem3) = parseOption(rem2, name: "--lines")
-        let (wsArg, rem4) = parseOption(rem3, name: "--workspace")
-        let (sfArg, rem5) = parseOption(rem4, name: "--surface")
-        let (windowOpt, rem6) = parseOption(rem5, name: "--window")
+        let (_, rem4) = parseOption(rem3, name: "--workspace")
+        let (_, rem5) = parseOption(rem4, name: "--surface")
+        let (_, rem6) = parseOption(rem5, name: "--window")
 
         var trailing = rem6
         var positionalOption: String?
