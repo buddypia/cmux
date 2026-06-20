@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "cmux — ស្ថានីយដែលបង្កើតសម្រាប់ពហុកិច្ចការ",
+    "title": "cmux — ទែមីណលដែលអាចសរសេរកម្មវិធីបានដែលបង្កើតសម្រាប់ពហុកិច្ចការ",
     "description": "ស្ថានីយ macOS ដើមកំណើតបង្កើតលើ Ghostty។ ដំណើរការជាមួយ Claude Code, Codex, OpenCode, Gemini CLI, Kiro, Aider និងឧបករណ៍ CLI ណាមួយ។",
     "ogDescription": "ស្ថានីយ macOS ដើមកំណើតសម្រាប់ភ្នាក់ងារសរសេរកូដ AI។"
   },
@@ -43,7 +43,7 @@
     "assets": "ធនធាន"
   },
   "home": {
-    "taglinePrefix": "ទែមីណលដែលបង្កើតសម្រាប់ ",
+    "taglinePrefix": "ទែមីណលដែលអាចសរសេរកម្មវិធីបានដែលបង្កើតសម្រាប់ ",
     "typingCodingAgents": "ភ្នាក់ងារសរសេរកូដ",
     "typingMultitasking": "ពហុកិច្ចការ",
     "subtitle": "កម្មវិធី macOS ដើមដែលបង្កើតលើ Ghostty។ ផ្ទាំងបញ្ឈរ, រង្វង់ជូនដំណឹងពេល agent ត្រូវការការយកចិត្តទុកដាក់, បន្ទះបំបែក, និង <cliLink>CLI</cliLink> សម្រាប់ការសរសេរកម្មវិធី។",
