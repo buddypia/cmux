@@ -360,6 +360,59 @@ struct PilotTuiMenuParserTests {
         #expect(options[1]["label"] as? String == "コード品質の全体監査")
     }
 
+    @Test("menu matcher resolves exact and unique substring labels safely")
+    func menuMatcherResolvesLabelsSafely() throws {
+        let menu = try #require(PilotTuiMenuParser.parseMenu(screen: single))
+
+        #expect(PilotTuiMenuMatcher.match(menu: menu, query: "コード品質の全体監査", confidence: 0.95) == .matched(
+            PilotTuiDecision(optionNumber: 2, confidence: 0.95, reason: "matched exact option label")
+        ))
+        #expect(PilotTuiMenuMatcher.match(menu: menu, query: "検証", confidence: 0.91) == .matched(
+            PilotTuiDecision(optionNumber: 3, confidence: 0.91, reason: "matched unique option label substring")
+        ))
+        #expect(PilotTuiMenuMatcher.match(menu: menu, query: "", confidence: 1) == .noMatch(reason: "empty match query"))
+    }
+
+    @Test("menu matcher skips unsafe options and ambiguous labels")
+    func menuMatcherRejectsUnsafeAndAmbiguousChoices() throws {
+        let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))
+        let duplicateMenu = PilotTuiMenu(
+            question: "Pick one",
+            options: [
+                PilotTuiOption(number: 1, label: "Proceed"),
+                PilotTuiOption(number: 2, label: "Proceed"),
+            ],
+            cursorIndex: 0,
+            hasSubmitBar: false
+        )
+
+        #expect(PilotTuiMenuMatcher.match(menu: menu, query: "Type something", confidence: 1) == .noMatch(
+            reason: "no safe option label matched query"
+        ))
+        #expect(PilotTuiMenuMatcher.match(menu: menu, query: "차단", confidence: 1) == .ambiguous(
+            reason: "match query is ambiguous",
+            optionNumbers: [2, 3]
+        ))
+        #expect(PilotTuiMenuMatcher.match(menu: duplicateMenu, query: "Proceed", confidence: 1) == .ambiguous(
+            reason: "match query is ambiguous",
+            optionNumbers: [1, 2]
+        ))
+    }
+
+    @Test("auto matcher reads the screen and sends planned selection keys")
+    func autoMatcherReadsAndSendsKeys() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: single)
+
+        let result = try await PilotTuiAutoSelector.runMatched(
+            driver: driver,
+            request: PilotTuiAutoMatchRequest(query: "検証", confidence: 0.95, readLines: 80)
+        )
+
+        #expect(result == .selected(targetNumber: 3, keys: [.down, .enter]))
+        #expect(driver.readLineCounts == [80])
+        #expect(driver.keys == [.down, .enter])
+    }
+
     @Test("planning skips unsafe targets and escapes low-confidence guesses")
     func planningSafety() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))

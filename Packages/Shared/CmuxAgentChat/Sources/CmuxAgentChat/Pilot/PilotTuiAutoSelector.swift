@@ -32,6 +32,33 @@ public struct PilotTuiAutoSelectRequest: Sendable, Equatable {
     }
 }
 
+/// Inputs for one Pilot TUI option-label match attempt.
+public struct PilotTuiAutoMatchRequest: Sendable, Equatable {
+    /// Text that must match one safe option label exactly or as a unique substring.
+    public let query: String
+
+    /// Confidence for the matched option choice.
+    public let confidence: Double
+
+    /// Minimum confidence required before selecting an option.
+    public let requiredConfidence: Double
+
+    /// Number of trailing terminal lines to read.
+    public let readLines: Int
+
+    public init(
+        query: String,
+        confidence: Double,
+        requiredConfidence: Double = 0.7,
+        readLines: Int = 120
+    ) {
+        self.query = query
+        self.confidence = confidence
+        self.requiredConfidence = requiredConfidence
+        self.readLines = readLines
+    }
+}
+
 /// Caller-provided decision for one detected Pilot TUI menu.
 public struct PilotTuiDecision: Sendable, Equatable {
     /// The rendered option number to choose.
@@ -149,6 +176,46 @@ public enum PilotTuiAutoSelector {
             return .escaped(keys: keys, reason: reason)
         case .skip(let reason):
             return .skipped(reason: reason)
+        }
+    }
+
+    public static func runMatched(
+        driver: any PilotTuiSurfaceDriving,
+        request: PilotTuiAutoMatchRequest
+    ) async throws -> PilotTuiAutoSelectResult {
+        let screen = try await driver.readScreen(
+            options: PilotTuiSurfaceReadOptions(lines: request.readLines)
+        )
+        guard let menu = PilotTuiMenuParser.parseMenu(screen: screen) else {
+            return .skipped(reason: "no Pilot TUI menu detected")
+        }
+
+        switch PilotTuiMenuMatcher.match(
+            menu: menu,
+            query: request.query,
+            confidence: request.confidence
+        ) {
+        case .matched(let decision):
+            switch PilotTuiMenuParser.planSelection(
+                menu: menu,
+                targetNumber: decision.optionNumber,
+                confidence: decision.confidence,
+                requiredConfidence: request.requiredConfidence
+            ) {
+            case .select(let keys, let targetNumber):
+                try await send(keys: keys, driver: driver)
+                return .selected(targetNumber: targetNumber, keys: keys)
+            case .escape(let keys, let reason):
+                try await send(keys: keys, driver: driver)
+                return .escaped(keys: keys, reason: reason)
+            case .skip(let reason):
+                return .skipped(reason: reason)
+            }
+        case .noMatch(let reason):
+            return .skipped(reason: reason)
+        case .ambiguous(let reason, let optionNumbers):
+            let options = optionNumbers.map(String.init).joined(separator: ",")
+            return .skipped(reason: "\(reason): \(options)")
         }
     }
 

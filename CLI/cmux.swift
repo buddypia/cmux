@@ -2799,6 +2799,7 @@ struct CMUXCLI {
     static let pilotUsage = """
         Usage: cmux pilot select --option <n> [flags]
                cmux pilot select <n> [flags]
+               cmux pilot choose --match <text> [flags]
                cmux pilot inspect [flags]
                cmux pilot submit [flags]
 
@@ -2817,6 +2818,7 @@ struct CMUXCLI {
 
         Examples:
           cmux pilot inspect --json
+          cmux pilot choose --match "コード品質"
           cmux pilot select --option 2
           cmux pilot submit
           cmux pilot select 1 --surface surface:2 --confidence 0.92 --json
@@ -2995,7 +2997,7 @@ struct CMUXCLI {
         "--confidence", "--config", "--cwd", "--description", "--direction", "--domain",
         "--dx", "--dy", "--email", "--event", "--expires", "--focus",
         "--function", "--id", "--image", "--index", "--key", "--kind",
-        "--layout", "--lines", "--load-state", "--max-depth", "--name", "--os",
+        "--layout", "--lines", "--load-state", "--match", "--max-depth", "--name", "--os",
         "--option", "--order", "--out", "--pane", "--panel", "--path", "--profile", "--property",
         "--provider", "--relay-port", "--script", "--selector", "--session",
         "--shell", "--source", "--subtitle", "--surface", "--tab", "--target-pane",
@@ -3090,6 +3092,13 @@ struct CMUXCLI {
         }
 
         switch subcommand {
+        case "choose":
+            try runPilotChooseCommand(
+                arguments: Array(commandArgs.dropFirst()),
+                client: client,
+                jsonOutput: jsonOutput,
+                windowOverride: windowOverride
+            )
         case "inspect":
             try runPilotInspectCommand(
                 arguments: Array(commandArgs.dropFirst()),
@@ -3115,6 +3124,61 @@ struct CMUXCLI {
             print(Self.pilotUsage)
         default:
             throw CLIError(message: "Unknown pilot subcommand: \(subcommand)")
+        }
+    }
+
+    private func runPilotChooseCommand(
+        arguments: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        windowOverride: String?
+    ) throws {
+        let (matchArg, rem0) = parseOption(arguments, name: "--match")
+        let (confidenceArg, rem1) = parseOption(rem0, name: "--confidence")
+        let (requiredConfidenceArg, rem2) = parseOption(rem1, name: "--required-confidence")
+        let (linesArg, rem3) = parseOption(rem2, name: "--lines")
+        let (_, rem4) = parseOption(rem3, name: "--workspace")
+        let (_, rem5) = parseOption(rem4, name: "--surface")
+        let (_, rem6) = parseOption(rem5, name: "--window")
+
+        let query: String
+        if let matchArg {
+            guard rem6.isEmpty else {
+                throw CLIError(message: "pilot choose: unexpected arguments: \(rem6.joined(separator: " "))")
+            }
+            query = matchArg
+        } else {
+            let positional = rem6.dropFirst(rem6.first == "--" ? 1 : 0)
+            guard !positional.isEmpty else {
+                throw CLIError(message: "pilot choose requires --match <text>")
+            }
+            query = positional.joined(separator: " ")
+        }
+
+        let confidence = try parsePilotConfidence(confidenceArg ?? "1", optionName: "--confidence")
+        let requiredConfidence = try parsePilotConfidence(requiredConfidenceArg ?? "0.7", optionName: "--required-confidence")
+        let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
+        let driver = try makePilotSurfaceDriver(
+            arguments: arguments,
+            client: client,
+            windowOverride: windowOverride
+        )
+        let result = try runSynchronousPilotTask {
+            try await PilotTuiAutoSelector.runMatched(
+                driver: driver,
+                request: PilotTuiAutoMatchRequest(
+                    query: query,
+                    confidence: confidence,
+                    requiredConfidence: requiredConfidence,
+                    readLines: readLines
+                )
+            )
+        }
+
+        if jsonOutput {
+            print(jsonString(pilotSelectPayload(result)))
+        } else {
+            print(pilotSelectSummary(result))
         }
     }
 
@@ -34512,7 +34576,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>]
           feedback [--email <email> --body <text> [--image <path> ...]]
           feed tui|clear
-          pilot inspect|select|submit [--option <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
+          pilot choose|inspect|select|submit [--match <text>] [--option <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           themes [list|set|clear]
           claude-teams [claude-args...]
           codex-teams [codex-args...]
@@ -34580,6 +34644,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           rename-window [--workspace <id|ref|index>] [--window <id|ref|index>] <title>
           current-workspace [--window <id|ref|index>]
           read-screen [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--scrollback] [--lines <n>]
+          pilot choose --match <text> [--confidence <0...1>] [--required-confidence <0...1>] [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           pilot inspect [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           pilot select --option <n> [--confidence <0...1>] [--required-confidence <0...1>] [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           pilot submit [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
