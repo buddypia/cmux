@@ -265,6 +265,10 @@ public struct AntigravityTranscriptParser: Sendable {
             appendSessionStart(root, seq: seq, timestamp: timestamp, into: &assembler)
         case "toolauthorizationrequired", "permissionrequired":
             appendPermissionRequest(root, seq: seq, timestamp: timestamp, into: &assembler)
+        case "toolauthorizationresult", "toolauthorizationdecision",
+             "toolauthorizationresponse", "toolauthorizationresolved",
+             "permissionresult", "permissiondecision", "permissionresponse":
+            resolvePermissionResult(root, into: &assembler)
         case "turncomplete":
             break
         default:
@@ -377,6 +381,27 @@ public struct AntigravityTranscriptParser: Sendable {
                         subject: budget.summaryArgument(subject)
                     )
                 )
+            ),
+            pendingKey: callID
+        )
+    }
+
+    private func resolvePermissionResult(
+        _ root: TranscriptJSONValue,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let callID = firstString(in: root, keys: [
+            "toolCallId", "tool_call_id", "requestId", "request_id", "callId", "call_id", "id",
+        ]),
+            let resolution = permissionResolution(from: root)
+        else { return }
+        let denied = resolution == .denied
+        assembler.resolve(
+            key: callID,
+            completion: TranscriptToolCompletion(
+                output: nil,
+                isError: denied,
+                exitCode: denied ? 1 : 0
             )
         )
     }
@@ -692,6 +717,47 @@ public struct AntigravityTranscriptParser: Sendable {
         for key in keys {
             if let double = value[key]?.double { return double }
             if let string = value[key]?.string, let double = Double(string) { return double }
+        }
+        return nil
+    }
+
+    private func firstBool(in value: TranscriptJSONValue?, keys: [String]) -> Bool? {
+        guard let value else { return nil }
+        for key in keys {
+            if let bool = value[key]?.bool { return bool }
+            if let string = value[key]?.string?.lowercased() {
+                switch string {
+                case "true", "yes", "1":
+                    return true
+                case "false", "no", "0":
+                    return false
+                default:
+                    continue
+                }
+            }
+        }
+        return nil
+    }
+
+    private func permissionResolution(from value: TranscriptJSONValue) -> ChatPermissionRequest.Resolution? {
+        if let approved = firstBool(in: value, keys: ["approved", "allowed", "allow"]) {
+            return approved ? .approved : .denied
+        }
+        if let denied = firstBool(in: value, keys: ["denied", "rejected", "blocked"]) {
+            return denied ? .denied : .approved
+        }
+        for key in ["decision", "resolution", "status", "outcome", "result"] {
+            guard let raw = value[key]?.string else { continue }
+            switch normalizedEventName(raw) {
+            case "approve", "approved", "allow", "allowed", "accept", "accepted",
+                 "grant", "granted", "ok", "success", "succeeded":
+                return .approved
+            case "deny", "denied", "reject", "rejected", "block", "blocked",
+                 "error", "failed", "failure", "cancel", "cancelled", "canceled":
+                return .denied
+            default:
+                continue
+            }
         }
         return nil
     }

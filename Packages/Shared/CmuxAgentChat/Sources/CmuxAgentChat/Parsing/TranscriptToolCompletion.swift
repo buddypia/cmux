@@ -70,6 +70,13 @@ struct TranscriptToolCompletion: Sendable {
                 selectedOptionLabel: answer
             )
             return message.replacingKind(.question(answered))
+        case .permissionRequest(let request):
+            let resolved = ChatPermissionRequest(
+                title: request.title,
+                subject: request.subject,
+                resolution: isError ? .denied : .approved
+            )
+            return message.replacingKind(.permissionRequest(resolved))
         default:
             return nil
         }

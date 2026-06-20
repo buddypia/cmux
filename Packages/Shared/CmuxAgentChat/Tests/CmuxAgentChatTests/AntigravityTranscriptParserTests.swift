@@ -234,6 +234,82 @@ struct AntigravityTranscriptParserTests {
         ))
     }
 
+    @Test("role event tool authorization result resolves same-call permission request")
+    func roleEventToolAuthorizationResultSameCall() {
+        let lines = [
+            Self.json([
+                "role": "event",
+                "name": "tool_authorization_required",
+                "toolCallId": "antigravity-call-020",
+                "toolName": "run_shell_command",
+                "args": ["command": "pwd"],
+                "timestamp": "2026-04-10T10:02:00.000Z",
+            ]),
+            Self.json([
+                "role": "event",
+                "name": "tool_authorization_result",
+                "toolCallId": "antigravity-call-020",
+                "decision": "approved",
+                "timestamp": "2026-04-10T10:02:01.000Z",
+            ]),
+        ]
+
+        let result = parser.parse(lines: lines, startingSeq: 13)
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == "antigravity-call-020")
+        #expect(result.messages[0].kind == .permissionRequest(
+            ChatPermissionRequest(
+                title: "Antigravity needs approval:",
+                subject: "pwd",
+                resolution: .approved
+            )
+        ))
+    }
+
+    @Test("role event permission result updates earlier permission request")
+    func roleEventPermissionResultAcrossCalls() {
+        let first = parser.parse(
+            lines: [
+                Self.json([
+                    "role": "event",
+                    "name": "permission_required",
+                    "request_id": "antigravity-call-denied",
+                    "toolName": "run_shell_command",
+                    "args": ["command": "rm file.txt"],
+                    "timestamp": "2026-04-10T10:02:00.000Z",
+                ]),
+            ],
+            startingSeq: 15
+        )
+        #expect(first.state.pendingToolUses.count == 1)
+
+        let second = parser.parse(
+            lines: [
+                Self.json([
+                    "role": "event",
+                    "name": "permission_result",
+                    "request_id": "antigravity-call-denied",
+                    "denied": true,
+                    "timestamp": "2026-04-10T10:02:01.000Z",
+                ]),
+            ],
+            startingSeq: 16,
+            state: first.state
+        )
+
+        #expect(second.messages.isEmpty)
+        #expect(second.updatedMessages.count == 1)
+        #expect(second.updatedMessages[0].id == "antigravity-call-denied")
+        #expect(second.updatedMessages[0].kind == .permissionRequest(
+            ChatPermissionRequest(
+                title: "Antigravity needs approval:",
+                subject: "rm file.txt",
+                resolution: .denied
+            )
+        ))
+    }
+
     @Test("user and assistant message rows map to prose and drop injected context")
     func proseMapping() {
         let lines = [
