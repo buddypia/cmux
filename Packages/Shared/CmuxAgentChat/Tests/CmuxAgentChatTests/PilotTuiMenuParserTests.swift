@@ -178,6 +178,72 @@ struct PilotTuiMenuParserTests {
         ])
     }
 
+    @Test("auto selector reads the screen and sends planned selection keys")
+    func autoSelectorSendsSelectionKeys() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: multi)
+        let result = try await PilotTuiAutoSelector.run(
+            driver: driver,
+            request: PilotTuiAutoSelectRequest(targetNumber: 3, confidence: 0.9, readLines: 80)
+        )
+
+        #expect(result == .selected(targetNumber: 3, keys: [.down, .down, .enter]))
+        #expect(driver.readLineCounts == [80])
+        #expect(driver.keys == [.down, .down, .enter])
+    }
+
+    @Test("auto selector confirms a ready submit bar before choosing an option")
+    func autoSelectorSubmitsReadyBar() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: preShipReady)
+        let result = try await PilotTuiAutoSelector.run(
+            driver: driver,
+            request: PilotTuiAutoSelectRequest(targetNumber: nil, confidence: 0)
+        )
+
+        #expect(result == .submitted(keys: [.right, .enter]))
+        #expect(driver.keys == [.right, .enter])
+    }
+
+    @Test("auto selector presses escape on low-confidence menu choices")
+    func autoSelectorEscapesLowConfidence() async throws {
+        let driver = RecordingPilotSurfaceDriver(screen: multi)
+        let result = try await PilotTuiAutoSelector.run(
+            driver: driver,
+            request: PilotTuiAutoSelectRequest(targetNumber: 2, confidence: 0.4)
+        )
+
+        guard case .escaped(let keys, _) = result else {
+            Issue.record("expected escaped result")
+            return
+        }
+        #expect(keys == [.escape])
+        #expect(driver.keys == [.escape])
+    }
+
+    @Test("auto selector skips unsafe or missing decisions without sending keys")
+    func autoSelectorSkipsWithoutKeys() async throws {
+        let unsafe = RecordingPilotSurfaceDriver(screen: multi)
+        let unsafeResult = try await PilotTuiAutoSelector.run(
+            driver: unsafe,
+            request: PilotTuiAutoSelectRequest(targetNumber: 4, confidence: 0.95)
+        )
+        guard case .skipped = unsafeResult else {
+            Issue.record("expected unsafe option to be skipped")
+            return
+        }
+        #expect(unsafe.keys.isEmpty)
+
+        let missing = RecordingPilotSurfaceDriver(screen: single)
+        let missingResult = try await PilotTuiAutoSelector.run(
+            driver: missing,
+            request: PilotTuiAutoSelectRequest(targetNumber: nil, confidence: 0.95)
+        )
+        guard case .skipped = missingResult else {
+            Issue.record("expected missing target to be skipped")
+            return
+        }
+        #expect(missing.keys.isEmpty)
+    }
+
     @Test("planning skips unsafe targets and escapes low-confidence guesses")
     func planningSafety() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))
