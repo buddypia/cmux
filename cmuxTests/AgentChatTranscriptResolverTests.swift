@@ -163,6 +163,36 @@ import CryptoKit
         #expect(resolver.transcriptPath(for: record) == transcript.path)
     }
 
+    @Test("Antigravity fallback finds single-object JSON by sessionId")
+    func antigravitySingleObjectJSON() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory
+            .appendingPathComponent("agentchat-resolver-agy-json-\(UUID().uuidString)", isDirectory: true)
+        let cwd = home.appendingPathComponent("json-repo", isDirectory: true)
+        try fm.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let transcript = home
+            .appendingPathComponent(".gemini", isDirectory: true)
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent("json-repo", isDirectory: true)
+            .appendingPathComponent("chats", isDirectory: true)
+            .appendingPathComponent("8a211dfc-80b1-4a68-a4a5-2486fa6f3beb", isDirectory: true)
+            .appendingPathComponent("snapshot.json", isDirectory: false)
+        try fm.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: [
+            "sessionId": "agy-json-session",
+            "projectHash": "project-hash",
+            "messages": [
+                ["type": "user", "content": "restore this JSON transcript"],
+            ],
+        ])
+        try data.write(to: transcript)
+
+        let resolver = AgentChatTranscriptResolver(homeDirectory: home)
+        let record = Self.antigravityRecord(sessionID: "agy-json-session", cwd: cwd.path)
+
+        #expect(resolver.transcriptPath(for: record) == transcript.path)
+    }
+
     @Test("Antigravity fallback finds older hash JSONL by top-level sessionId")
     func antigravityHashJSONL() throws {
         let fm = FileManager.default

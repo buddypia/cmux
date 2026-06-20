@@ -175,6 +175,48 @@ struct AntigravityTranscriptParserTests {
         ))
     }
 
+    @Test("single-object JSON transcript maps metadata and messages")
+    func singleObjectJSONTranscript() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "sessionId": "antigravity-json-session",
+            "projectHash": "project-hash",
+            "startTime": "2026-06-12T00:00:00.000Z",
+            "messages": [
+                [
+                    "type": "user",
+                    "content": "summarize the new transcript format",
+                    "timestamp": "2026-06-12T00:00:01.000Z",
+                ],
+                [
+                    "type": "gemini",
+                    "content": "Current agy assistant row.",
+                    "timestamp": "2026-06-12T00:00:02.000Z",
+                ],
+                [
+                    "role": "model",
+                    "parts": [["text": "Role parts assistant row."]],
+                    "timestamp": "2026-06-12T00:00:03.000Z",
+                ],
+            ],
+        ])
+
+        let result = parser.parse(transcriptJSONData: data, startingSeq: 10)
+
+        #expect(result.messages.count == 4)
+        #expect(result.messages[0].id == "antigravity-json-session")
+        #expect(result.messages[0].seq == 10)
+        #expect(result.messages[0].kind == .status(ChatStatusTransition(event: .sessionStarted)))
+        #expect(result.messages[1].seq == 11)
+        #expect(result.messages[1].role == .user)
+        #expect(result.messages[1].kind == .prose(ChatProse(text: "summarize the new transcript format")))
+        #expect(result.messages[2].seq == 12)
+        #expect(result.messages[2].role == .agent)
+        #expect(result.messages[2].kind == .prose(ChatProse(text: "Current agy assistant row.")))
+        #expect(result.messages[3].seq == 13)
+        #expect(result.messages[3].role == .agent)
+        #expect(result.messages[3].kind == .prose(ChatProse(text: "Role parts assistant row.")))
+    }
+
     @Test("role/parts thought and functionCall parts emit in transcript order")
     func rolePartsThoughtAndFunctionCall() {
         let lines = [

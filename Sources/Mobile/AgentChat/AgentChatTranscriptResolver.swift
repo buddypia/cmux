@@ -2,7 +2,7 @@ import CmuxAgentChat
 import CryptoKit
 import Foundation
 
-/// Resolves the transcript JSONL path for an agent session.
+/// Resolves the transcript path for an agent session.
 ///
 /// Preference order: the hook store's recorded `transcriptPath`, then the
 /// agent-specific conventional location (claude: encoded-cwd project dir;
@@ -184,7 +184,7 @@ struct AgentChatTranscriptResolver {
         return nil
     }
 
-    /// Antigravity's current `agy` JSONL files live under
+    /// Antigravity's current `agy` JSONL/JSON files live under
     /// `~/.gemini/tmp/<workspace-name>/chats/`, while older builds used a
     /// hash bucket under `~/.antigravity/tmp/<sha256(cwd)>/chats/`. Restrict
     /// fallback discovery to those cwd-derived directories so a stale session
@@ -205,7 +205,7 @@ struct AgentChatTranscriptResolver {
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard isAntigravityJSONLTranscript(url),
+                guard isAntigravityTranscriptFile(url),
                       antigravityTranscript(url, matchesSessionID: sessionID) else {
                     continue
                 }
@@ -248,9 +248,9 @@ struct AgentChatTranscriptResolver {
         return result
     }
 
-    private func isAntigravityJSONLTranscript(_ url: URL) -> Bool {
+    private func isAntigravityTranscriptFile(_ url: URL) -> Bool {
         let name = url.lastPathComponent
-        return url.pathExtension == "jsonl" && !name.hasPrefix("__pending__")
+        return (url.pathExtension == "json" || url.pathExtension == "jsonl") && !name.hasPrefix("__pending__")
     }
 
     private func antigravityTranscript(_ url: URL, matchesSessionID sessionID: String) -> Bool {
@@ -259,15 +259,18 @@ struct AgentChatTranscriptResolver {
         if stem == needle || stem.contains(needle) {
             return true
         }
-        return antigravitySessionID(inJSONL: url)?.lowercased() == needle
+        return antigravitySessionID(inTranscript: url)?.lowercased() == needle
     }
 
-    private func antigravitySessionID(inJSONL url: URL) -> String? {
+    private func antigravitySessionID(inTranscript url: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let data = (try? handle.read(upToCount: 65_536)) ?? Data()
+        let data = (try? handle.read(upToCount: 256 * 1024)) ?? Data()
         guard !data.isEmpty else { return nil }
         let text = String(decoding: data, as: UTF8.self)
+        if url.pathExtension == "json", let id = Self.sessionIDField(in: text) {
+            return id
+        }
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             if let id = Self.sessionIDField(in: String(line)) {
                 return id

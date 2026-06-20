@@ -1,6 +1,7 @@
 import Foundation
 
-/// Converts Antigravity CLI transcript JSONL lines into ``ChatMessage`` values.
+/// Converts Antigravity CLI transcript JSONL lines and single-object JSON
+/// snapshots into ``ChatMessage`` values.
 ///
 /// Antigravity's hook contract exposes a `transcriptPath`, but its transcript
 /// rows have evolved across releases. This parser therefore reads the current
@@ -40,13 +41,56 @@ public struct AntigravityTranscriptParser: Sendable {
         startingSeq: Int,
         state: ChatTranscriptParseState = ChatTranscriptParseState()
     ) -> ChatTranscriptParseResult {
-        var assembler = TranscriptBatchAssembler(state: state, budget: budget)
-        var lastTimestamp = state.lastTimestamp
+        var records: [(seq: Int, root: TranscriptJSONValue)] = []
         for (offset, line) in lines.enumerated() {
-            let seq = startingSeq + offset
             guard let root = TranscriptJSONValue(jsonLine: line), root.object != nil else {
                 continue
             }
+            records.append((seq: startingSeq + offset, root: root))
+        }
+        return parse(records: records, state: state)
+    }
+
+    /// Parses Antigravity's newer single-object `.json` transcript shape
+    /// (`{ sessionId, projectHash, messages: [...] }`) into chat messages.
+    ///
+    /// The snapshot is treated as a virtual transcript: top-level metadata gets
+    /// the first seq when present, followed by each row in `messages` or
+    /// `conversation`.
+    public func parse(
+        transcriptJSONData data: Data,
+        startingSeq: Int = 0,
+        state: ChatTranscriptParseState = ChatTranscriptParseState()
+    ) -> ChatTranscriptParseResult {
+        guard let root = try? JSONDecoder().decode(TranscriptJSONValue.self, from: data),
+              root.object != nil else {
+            return ChatTranscriptParseResult(messages: [], updatedMessages: [], state: state)
+        }
+
+        var records: [(seq: Int, root: TranscriptJSONValue)] = []
+        var nextSeq = startingSeq
+        if root["sessionId"]?.string != nil, root["projectHash"]?.string != nil {
+            records.append((seq: nextSeq, root: root))
+            nextSeq += 1
+        }
+        if let rows = root["messages"]?.array ?? root["conversation"]?.array {
+            for row in rows where row.object != nil {
+                records.append((seq: nextSeq, root: row))
+                nextSeq += 1
+            }
+        } else if records.isEmpty {
+            records.append((seq: nextSeq, root: root))
+        }
+        return parse(records: records, state: state)
+    }
+
+    private func parse(
+        records: [(seq: Int, root: TranscriptJSONValue)],
+        state: ChatTranscriptParseState
+    ) -> ChatTranscriptParseResult {
+        var assembler = TranscriptBatchAssembler(state: state, budget: budget)
+        var lastTimestamp = state.lastTimestamp
+        for (seq, root) in records {
             if let stamped = timestamps.date(from: firstString(in: root, keys: [
                 "timestamp", "created_at", "createdAt", "time", "startTime", "lastUpdated",
             ])) {

@@ -2,9 +2,11 @@ import CmuxAgentChat
 import CmuxFoundation
 import Foundation
 
-/// Tails one agent session's transcript JSONL: initial bounded backfill,
-/// incremental parsing on file growth, an in-memory message cache for
-/// history paging, and append/update batches for live push.
+/// Tails one agent session's transcript: initial bounded backfill,
+/// incremental parsing on JSONL growth, an in-memory message cache for
+/// history paging, and append/update batches for live push. Antigravity's
+/// single-object `.json` transcript is treated as a snapshot and reloaded on
+/// rewrite.
 ///
 /// Seq stability: `seq` equals the absolute transcript line index. The
 /// initial backfill may skip a long head (bounded memory), in which case
@@ -77,13 +79,17 @@ actor AgentChatTranscriptTailer {
     func start() async {
         guard !started else { return }
         started = true
-        loadInitialTail()
+        if isAntigravityJSONSnapshot {
+            loadAntigravityJSONSnapshot()
+        } else {
+            loadInitialTail()
+        }
         let watcher = FileWatcher(path: path, throttle: .milliseconds(200))
         self.watcher = watcher
         watchTask = Task { [weak self] in
             for await _ in watcher.events {
                 guard let self else { return }
-                await self.drainNewContent()
+                await self.handleFileChange()
             }
         }
     }
@@ -141,6 +147,56 @@ actor AgentChatTranscriptTailer {
     }
 
     // MARK: - Reading
+
+    private var isAntigravityJSONSnapshot: Bool {
+        agentKind == .antigravity && URL(fileURLWithPath: path).pathExtension == "json"
+    }
+
+    private func handleFileChange() async {
+        if isAntigravityJSONSnapshot {
+            await reloadAntigravityJSONSnapshot()
+        } else {
+            await drainNewContent()
+        }
+    }
+
+    @discardableResult
+    private func loadAntigravityJSONSnapshot() -> Bool {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe),
+              !data.isEmpty,
+              (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            return false
+        }
+        let outcome = AntigravityTranscriptParser().parse(transcriptJSONData: data)
+        cache = outcome.messages
+        parseState = outcome.state
+        byteOffset = UInt64(data.count)
+        lineCount = outcome.messages.count
+        fileInode = Self.inode(ofPath: path)
+        pendingFragment = Data()
+        headTruncated = false
+        trimCacheIfNeeded()
+        return true
+    }
+
+    private func reloadAntigravityJSONSnapshot() async {
+        let previous = cache
+        guard loadAntigravityJSONSnapshot() else { return }
+        guard cache != previous else { return }
+        var discoveredTitle: String?
+        if !reportedTitle, let title {
+            reportedTitle = true
+            discoveredTitle = title
+        }
+        await onBatch(
+            Batch(
+                appended: cache,
+                updated: [],
+                discoveredTitle: discoveredTitle,
+                didReset: true
+            )
+        )
+    }
 
     private func loadInitialTail() {
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
