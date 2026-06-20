@@ -35,6 +35,8 @@ struct AgentChatTranscriptResolver {
             return claudeFallbackPath(record: record)
         case .codex:
             return codexFallbackPath(sessionID: record.sessionID)
+        case .antigravity:
+            return nil
         case .other:
             return nil
         }

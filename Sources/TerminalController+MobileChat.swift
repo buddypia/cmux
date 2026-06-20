@@ -372,6 +372,11 @@ extension TerminalController {
         case .codex:
             return TextBoxAgentDetection.codex.matches(context: context)
                 || normalizedTitle.contains("codex")
+        case .antigravity:
+            return normalizedTitle.contains("antigravity")
+                || normalizedTitle.contains("agy")
+                || context.localizedCaseInsensitiveContains("antigravity")
+                || context.localizedCaseInsensitiveContains("agy")
         case .other(let source):
             return !source.isEmpty && (
                 context.localizedCaseInsensitiveContains(source)

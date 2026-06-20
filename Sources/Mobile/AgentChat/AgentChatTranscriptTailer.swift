@@ -257,6 +257,8 @@ actor AgentChatTranscriptTailer {
         switch agentKind {
         case .codex:
             return CodexTranscriptParser().parse(lines: lines, startingSeq: startingSeq, state: parseState)
+        case .antigravity:
+            return AntigravityTranscriptParser().parse(lines: lines, startingSeq: startingSeq, state: parseState)
         case .claude, .other:
             return ClaudeTranscriptParser().parse(lines: lines, startingSeq: startingSeq, state: parseState)
         }

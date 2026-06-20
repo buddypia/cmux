@@ -1,0 +1,428 @@
+import Foundation
+
+/// Converts Antigravity CLI transcript JSONL lines into ``ChatMessage`` values.
+///
+/// Antigravity's hook contract exposes a `transcriptPath`, but its transcript
+/// rows are less formally documented than Claude/Codex. This parser therefore
+/// reads the stable semantic shapes cmux already receives from hooks: user and
+/// assistant/agent/model message rows, plus `PreToolUse`/`PostToolUse` tool
+/// lifecycle rows. Unknown rows fail open.
+public struct AntigravityTranscriptParser: Sendable {
+    private static let userNoisePrefixes = [
+        "<environment_context",
+        "<permissions",
+        "# AGENTS.md instructions",
+    ]
+    private static let shellToolNames: Set<String> = [
+        "run_command", "execute_bash", "shell", "exec_command",
+    ]
+    private static let summaryArgumentKeys = [
+        "path", "file_path", "pattern", "query", "url", "text", "command", "cmd",
+    ]
+
+    private let budget = TranscriptTextBudget()
+    private let timestamps = TranscriptTimestampParser()
+
+    /// Creates an Antigravity transcript parser.
+    public init() {}
+
+    /// Parses a contiguous run of JSONL lines into chat messages.
+    ///
+    /// - Parameters:
+    ///   - lines: The raw JSONL lines, one transcript row each.
+    ///   - startingSeq: The absolute line index of the first input line.
+    ///   - state: Carry-over state from the previous parse call.
+    /// - Returns: The new messages, updates to earlier messages whose tool
+    ///   result arrived in this call, and the next carry-over state.
+    public func parse(
+        lines: some Sequence<String>,
+        startingSeq: Int,
+        state: ChatTranscriptParseState = ChatTranscriptParseState()
+    ) -> ChatTranscriptParseResult {
+        var assembler = TranscriptBatchAssembler(state: state, budget: budget)
+        var lastTimestamp = state.lastTimestamp
+        for (offset, line) in lines.enumerated() {
+            let seq = startingSeq + offset
+            guard let root = TranscriptJSONValue(jsonLine: line), root.object != nil else {
+                continue
+            }
+            if let stamped = timestamps.date(from: firstString(in: root, keys: [
+                "timestamp", "created_at", "createdAt", "time",
+            ])) {
+                lastTimestamp = stamped
+            }
+            let timestamp = lastTimestamp ?? Date(timeIntervalSince1970: 0)
+            let event = normalizedEventName(firstString(in: root, keys: [
+                "hook_event_name", "hookEventName", "event_name", "eventName", "event", "type", "kind",
+            ]))
+            switch event {
+            case "sessionstart":
+                appendSessionStart(root, seq: seq, timestamp: timestamp, into: &assembler)
+                continue
+            case "sessionend":
+                appendSessionEnd(root, seq: seq, timestamp: timestamp, into: &assembler)
+                continue
+            case "precompact", "postcompact", "compacted":
+                appendContextCompacted(root, seq: seq, timestamp: timestamp, into: &assembler)
+                continue
+            case "pretooluse", "toolstart", "toolcall":
+                appendToolStart(root, seq: seq, timestamp: timestamp, into: &assembler)
+                continue
+            case "posttooluse", "toolend", "toolresult":
+                resolveToolResult(root, into: &assembler)
+                continue
+            default:
+                break
+            }
+            appendMessage(root, seq: seq, timestamp: timestamp, into: &assembler)
+        }
+        return assembler.result(lastTimestamp: lastTimestamp)
+    }
+
+    // MARK: - Lifecycle
+
+    private func appendSessionStart(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        let detail = firstString(in: root, keys: ["cwd", "workspace", "workspacePath"])
+            ?? root["workspacePaths"]?.array?.first?.string
+        assembler.append(
+            ChatMessage(
+                id: lineID(root, seq: seq),
+                seq: seq,
+                role: .system,
+                timestamp: timestamp,
+                kind: .status(ChatStatusTransition(event: .sessionStarted, detail: detail))
+            )
+        )
+    }
+
+    private func appendSessionEnd(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        assembler.append(
+            ChatMessage(
+                id: lineID(root, seq: seq),
+                seq: seq,
+                role: .system,
+                timestamp: timestamp,
+                kind: .status(
+                    ChatStatusTransition(
+                        event: .sessionEnded,
+                        detail: firstString(in: root, keys: ["terminationReason", "reason", "error"])
+                    )
+                )
+            )
+        )
+    }
+
+    private func appendContextCompacted(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        assembler.append(
+            ChatMessage(
+                id: lineID(root, seq: seq),
+                seq: seq,
+                role: .system,
+                timestamp: timestamp,
+                kind: .status(ChatStatusTransition(event: .contextCompacted))
+            )
+        )
+    }
+
+    // MARK: - Messages
+
+    private func appendMessage(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        for container in containers(from: root) {
+            guard let role = chatRole(from: container) else { continue }
+            if let thought = thoughtText(from: container), !thought.isEmpty {
+                assembler.append(
+                    ChatMessage(
+                        id: "\(lineID(root, seq: seq))-thought",
+                        seq: seq,
+                        role: .agent,
+                        timestamp: timestamp,
+                        kind: .thought(ChatThought(text: budget.body(thought)))
+                    )
+                )
+            }
+            guard let text = messageText(from: container), !text.isEmpty else { continue }
+            if role == .user,
+               Self.userNoisePrefixes.contains(where: { text.hasPrefix($0) }) {
+                continue
+            }
+            assembler.append(
+                ChatMessage(
+                    id: lineID(root, seq: seq),
+                    seq: seq,
+                    role: role,
+                    timestamp: timestamp,
+                    kind: .prose(ChatProse(text: budget.body(text)))
+                )
+            )
+            return
+        }
+    }
+
+    private func chatRole(from value: TranscriptJSONValue) -> ChatRole? {
+        let role = firstString(in: value, keys: ["role", "author", "speaker"])?.lowercased()
+        let type = firstString(in: value, keys: ["type", "kind"])?.lowercased()
+        switch role ?? type {
+        case "user", "human":
+            return .user
+        case "assistant", "agent", "model", "assistant_message", "agent_message", "model_message":
+            return .agent
+        default:
+            return nil
+        }
+    }
+
+    private func messageText(from value: TranscriptJSONValue) -> String? {
+        if let content = value["content"] {
+            if let text = content.string {
+                return nonEmpty(text)
+            }
+            let texts = (content.array ?? []).compactMap { block -> String? in
+                let type = block["type"]?.string
+                guard type == nil || type == "text" || type == "input_text" || type == "output_text" else {
+                    return nil
+                }
+                return nonEmpty(block["text"]?.string ?? block["content"]?.string ?? "")
+            }
+            if !texts.isEmpty {
+                return texts.joined(separator: "\n\n")
+            }
+        }
+        return firstString(in: value, keys: [
+            "text", "body", "summary", "assistant_response", "assistantResponse",
+            "last_assistant_message", "lastAssistantMessage",
+        ]).flatMap(nonEmpty)
+    }
+
+    private func thoughtText(from value: TranscriptJSONValue) -> String? {
+        let blocks = value["content"]?.array ?? []
+        let texts = blocks.compactMap { block -> String? in
+            switch block["type"]?.string {
+            case "thinking":
+                return nonEmpty(block["thinking"]?.string ?? block["text"]?.string ?? "")
+            case "reasoning":
+                return nonEmpty(block["text"]?.string ?? block["summary"]?.string ?? "")
+            default:
+                return nil
+            }
+        }
+        return texts.isEmpty ? nil : texts.joined(separator: "\n\n")
+    }
+
+    // MARK: - Tools
+
+    private func appendToolStart(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let call = toolCall(in: root),
+              let name = firstString(in: call, keys: ["name", "tool_name", "toolName", "tool"])
+        else { return }
+        let callID = toolCallID(root: root, call: call)
+        let input = toolInput(root: root, call: call)
+        let kind: ChatMessageKind
+        if Self.shellToolNames.contains(name),
+           let command = shellCommand(from: input) {
+            kind = .terminal(ChatTerminalCapture(command: command, isRunning: true))
+        } else {
+            let inputDetail = input.flatMap { value -> String? in
+                let json = value.compactJSONString()
+                return json == "{}" ? nil : budget.inputDetail(json)
+            }
+            kind = .toolUse(
+                ChatToolUse(
+                    toolName: name,
+                    summary: toolSummary(name: name, input: input),
+                    inputDetail: inputDetail
+                )
+            )
+        }
+        assembler.append(
+            ChatMessage(
+                id: callID ?? lineID(root, seq: seq),
+                seq: seq,
+                role: .agent,
+                timestamp: timestamp,
+                kind: kind
+            ),
+            pendingKey: callID
+        )
+    }
+
+    private func resolveToolResult(
+        _ root: TranscriptJSONValue,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        let call = toolCall(in: root)
+        guard let callID = toolCallID(root: root, call: call) else { return }
+        let result = firstObject(in: root, keys: ["tool_result", "toolResult", "result", "response", "output"])
+        assembler.resolve(key: callID, completion: completion(from: result ?? root))
+    }
+
+    private func toolCall(in root: TranscriptJSONValue) -> TranscriptJSONValue? {
+        for container in containers(from: root) {
+            if let call = firstObject(in: container, keys: ["toolCall", "tool_call", "tool"]) {
+                return call
+            }
+            if firstString(in: container, keys: ["tool_name", "toolName", "name"]) != nil {
+                return container
+            }
+        }
+        return nil
+    }
+
+    private func toolInput(root: TranscriptJSONValue, call: TranscriptJSONValue) -> TranscriptJSONValue? {
+        if let input = firstObject(in: call, keys: ["args", "arguments", "input", "tool_input", "toolInput"]) {
+            return input
+        }
+        for container in containers(from: root) {
+            if let input = firstObject(in: container, keys: ["tool_input", "toolInput", "args", "arguments"]) {
+                return input
+            }
+        }
+        return nil
+    }
+
+    private func toolCallID(root: TranscriptJSONValue, call: TranscriptJSONValue?) -> String? {
+        if let call,
+           let id = firstString(in: call, keys: ["id", "call_id", "callId", "tool_call_id", "toolCallId"]) {
+            return id
+        }
+        return firstString(in: root, keys: ["tool_call_id", "toolCallId", "call_id", "callId", "id"])
+    }
+
+    private func shellCommand(from input: TranscriptJSONValue?) -> String? {
+        guard let input else { return nil }
+        if let cmd = firstString(in: input, keys: ["command", "cmd", "script"]) {
+            return cmd
+        }
+        if let parts = input["command"]?.array ?? input["cmd"]?.array {
+            let strings = parts.compactMap(\.string)
+            guard !strings.isEmpty else { return nil }
+            if strings.count >= 3,
+               let binary = strings[0].split(separator: "/").last,
+               ["bash", "sh", "zsh"].contains(String(binary)),
+               strings[1] == "-lc" || strings[1] == "-c" {
+                return strings[2...].joined(separator: " ")
+            }
+            return strings.joined(separator: " ")
+        }
+        return nil
+    }
+
+    private func toolSummary(name: String, input: TranscriptJSONValue?) -> String {
+        guard let input else { return name }
+        for key in Self.summaryArgumentKeys {
+            if let value = input[key]?.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "\(name) \(budget.summaryArgument(value))"
+            }
+        }
+        return name
+    }
+
+    private func completion(from value: TranscriptJSONValue) -> TranscriptToolCompletion {
+        let text = firstString(in: value, keys: ["output", "result", "stdout", "stderr", "text", "message"])
+            ?? value.string
+        var exitCode = firstInt(in: value, keys: ["exit_code", "exitCode", "status"])
+            ?? firstInt(in: value["metadata"], keys: ["exit_code", "exitCode"])
+        let duration = firstDouble(in: value, keys: ["duration_seconds", "durationSeconds", "wall_time_seconds"])
+            ?? firstDouble(in: value["metadata"], keys: ["duration_seconds", "durationSeconds"])
+        if exitCode == nil, let text,
+           let match = text.prefix(400).firstMatch(of: /(?:Process exited with code|Exit code:?|exited with code) (-?\d+)/) {
+            exitCode = Int(match.1)
+        }
+        let explicitError = value["is_error"]?.bool ?? value["isError"]?.bool ?? value["error"]?.bool
+        return TranscriptToolCompletion(
+            output: text,
+            isError: explicitError ?? ((exitCode ?? 0) != 0),
+            exitCode: exitCode,
+            durationSeconds: duration
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func containers(from root: TranscriptJSONValue) -> [TranscriptJSONValue] {
+        [
+            root,
+            root["message"],
+            root["payload"],
+            root["data"],
+            root["event"],
+        ].compactMap { $0 }
+    }
+
+    private func firstString(in value: TranscriptJSONValue?, keys: [String]) -> String? {
+        guard let value else { return nil }
+        for key in keys {
+            if let string = value[key]?.string {
+                return string
+            }
+        }
+        return nil
+    }
+
+    private func firstObject(in value: TranscriptJSONValue?, keys: [String]) -> TranscriptJSONValue? {
+        guard let value else { return nil }
+        for key in keys {
+            if value[key]?.object != nil || value[key]?.string != nil {
+                return value[key]
+            }
+        }
+        return nil
+    }
+
+    private func firstInt(in value: TranscriptJSONValue?, keys: [String]) -> Int? {
+        guard let value else { return nil }
+        for key in keys {
+            if let int = value[key]?.int { return int }
+            if let string = value[key]?.string, let int = Int(string) { return int }
+        }
+        return nil
+    }
+
+    private func firstDouble(in value: TranscriptJSONValue?, keys: [String]) -> Double? {
+        guard let value else { return nil }
+        for key in keys {
+            if let double = value[key]?.double { return double }
+            if let string = value[key]?.string, let double = Double(string) { return double }
+        }
+        return nil
+    }
+
+    private func lineID(_ root: TranscriptJSONValue, seq: Int) -> String {
+        firstString(in: root, keys: ["uuid", "id", "messageId", "message_id"]) ?? "line-\(seq)"
+    }
+
+    private func normalizedEventName(_ raw: String?) -> String {
+        (raw ?? "")
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func nonEmpty(_ text: String?) -> String? {
+        let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
