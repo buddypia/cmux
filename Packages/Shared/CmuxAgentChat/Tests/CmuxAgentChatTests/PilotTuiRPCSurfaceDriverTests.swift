@@ -86,6 +86,41 @@ struct PilotTuiRPCSurfaceDriverTests {
         ])
     }
 
+    @Test("RPC values bridge to JSON objects for SocketClient params")
+    func jsonObjectDictionary() throws {
+        let params = PilotTuiRPCValue.jsonObjectDictionary(from: [
+            "key": .string("enter"),
+            "lines": .int(120),
+            "scrollback": .bool(true),
+            "empty": .null,
+        ])
+
+        #expect(JSONSerialization.isValidJSONObject(params))
+        #expect(params["key"] as? String == "enter")
+        #expect(params["lines"] as? Int == 120)
+        #expect(params["scrollback"] as? Bool == true)
+        #expect(params["empty"] is NSNull)
+    }
+
+    @Test("JSON objects bridge back to RPC values and skip unsupported payloads")
+    func rpcDictionaryFromJSONObjects() {
+        let values = PilotTuiRPCValue.dictionary(from: [
+            "text": "screen",
+            "lines": NSNumber(value: 80),
+            "scrollback": NSNumber(value: true),
+            "empty": NSNull(),
+            "fraction": NSNumber(value: 1.25),
+            "object": ["unsupported": true],
+        ])
+
+        #expect(values == [
+            "text": .string("screen"),
+            "lines": .int(80),
+            "scrollback": .bool(true),
+            "empty": .null,
+        ])
+    }
+
     @Test("auto selector can drive the RPC surface driver end to end")
     func autoSelectorIntegration() async throws {
         let screen = [

@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// A small Sendable JSON-RPC value vocabulary for Pilot surface commands.
@@ -12,6 +13,54 @@ public enum PilotTuiRPCValue: Sendable, Equatable {
             return value
         }
         return nil
+    }
+
+    public var jsonObject: Any {
+        switch self {
+        case .string(let value):
+            return value
+        case .int(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .null:
+            return NSNull()
+        }
+    }
+
+    public init?(jsonObject: Any) {
+        switch jsonObject {
+        case let value as String:
+            self = .string(value)
+        case let value as Bool:
+            self = .bool(value)
+        case let value as Int:
+            self = .int(value)
+        case is NSNull:
+            self = .null
+        case let value as NSNumber where CFGetTypeID(value) == CFBooleanGetTypeID():
+            self = .bool(value.boolValue)
+        case let value as NSNumber:
+            let double = value.doubleValue
+            guard double.isFinite, double.rounded(.towardZero) == double else {
+                return nil
+            }
+            self = .int(value.intValue)
+        default:
+            return nil
+        }
+    }
+
+    public static func jsonObjectDictionary(
+        from values: [String: PilotTuiRPCValue]
+    ) -> [String: Any] {
+        values.mapValues(\.jsonObject)
+    }
+
+    public static func dictionary(
+        from jsonObject: [String: Any]
+    ) -> [String: PilotTuiRPCValue] {
+        jsonObject.compactMapValues { PilotTuiRPCValue(jsonObject: $0) }
     }
 }
 
