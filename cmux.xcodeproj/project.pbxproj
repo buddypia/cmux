@@ -5022,6 +5022,7 @@
 		};
 		CA53A005CA53A005CA53A005 /* CmuxCanvasUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = CA53A004CA53A004CA53A004 /* XCLocalSwiftPackageReference "CmuxCanvasUI" */;
 			productName = CmuxCanvasUI;
 		};
 		C5A1FED000000000000000C3 /* CmuxSwiftRender */ = {

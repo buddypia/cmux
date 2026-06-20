@@ -2,6 +2,7 @@
 # CI guard for cmux.xcodeproj/project.pbxproj.
 # Fails when:
 #   - objectVersion drifts from the pinned value (Xcode major leak)
+#   - a Swift package product dependency loses its package reference
 #   - the file is not normalized (someone bypassed the pre-commit hook)
 set -euo pipefail
 
@@ -28,4 +29,5 @@ if [[ "$actual" != "$EXPECTED_OBJECT_VERSION" ]]; then
     exit 1
 fi
 
+python3 "$SCRIPT_DIR/check-pbxproj-package-products.py" "$PBXPROJ"
 python3 "$SCRIPT_DIR/normalize-pbxproj.py" --check "$PBXPROJ"
