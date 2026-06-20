@@ -61,10 +61,29 @@ def test_missing_cache_is_noop() -> None:
         assert "no Xcode SourcePackages workspace-state.json files found" in result.stdout
 
 
+def test_removes_cache_when_binary_artifact_dir_is_empty() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        cache_dir = Path(temp_dir) / ".ci-source-packages"
+        artifact = cache_dir / "artifacts" / "sparkle" / "Sparkle" / "Sparkle.xcframework"
+        artifact.mkdir(parents=True)
+        incomplete = cache_dir / "artifacts" / "sentry-cocoa" / "Sentry-Dynamic"
+        incomplete.mkdir(parents=True)
+        state = cache_dir / "workspace-state.json"
+        state.write_text("{}\n")
+
+        result = run_helper(cache_dir)
+
+        assert result.returncode == 0, result.stderr
+        assert not cache_dir.exists()
+        assert "incomplete binary artifacts" in result.stdout
+        assert "Sentry-Dynamic" in result.stdout
+
+
 def main() -> int:
     test_removes_workspace_state_and_keeps_downloaded_cache()
     test_missing_cache_is_noop()
-    print("PASS: Xcode SourcePackages cache sanitizer preserves cache contents")
+    test_removes_cache_when_binary_artifact_dir_is_empty()
+    print("PASS: Xcode SourcePackages cache sanitizer handles stale cache states")
     return 0
 
 
