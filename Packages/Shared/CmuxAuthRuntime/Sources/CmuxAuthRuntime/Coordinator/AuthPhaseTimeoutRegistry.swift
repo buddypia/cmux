@@ -5,12 +5,15 @@ actor AuthPhaseTimeoutRegistry {
     private var timedOutPhases: [String: UUID] = [:]
 
     func canBegin(_ phase: AuthPhase) -> Bool {
-        timedOutPhases[phase.rawValue] == nil
+        let key = phase.rawValue
+        return timedOutPhases[key] == nil && activePhases[key]?.isEmpty != false
     }
 
     func begin(_ phase: AuthPhase, id: UUID) -> Bool {
         let key = phase.rawValue
-        guard timedOutPhases[key] == nil else { return false }
+        guard timedOutPhases[key] == nil, activePhases[key]?.isEmpty != false else {
+            return false
+        }
         activePhases[key, default: []].insert(id)
         return true
     }

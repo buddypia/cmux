@@ -18,13 +18,17 @@ actor AuthPhaseTimeoutRace {
     }
 }
 
-/// Race `operation` against a `duration` deadline on `clock`.
+/// Race a prompt-only operation against a `duration` deadline on `clock`.
 ///
 /// Whichever side finishes first cancels the other and resumes the caller
 /// immediately. The losing task is not joined, because some Stack SDK calls can
 /// ignore cancellation while parked in network/token refresh code; joining
 /// those calls would keep user-visible restore/sign-in spinners alive after
 /// the deadline had already fired.
+///
+/// Do not use this helper for phases that can refresh/write credentials or run
+/// signed-in side effects. Those phases need coordinator-owned task handles so
+/// sign-out can cancel late work and compare-clear stale token writes.
 ///
 /// - Parameters:
 ///   - phase: The phase label for timeout diagnostics.
@@ -56,19 +60,18 @@ func withAuthPhaseTimeout<T: Sendable>(
 
     let stream = AsyncThrowingStream<T, any Error> { continuation in
         let operationTask = Task {
-            defer {
-                if blocksRetriesWhileTimedOutOperationActive {
-                    Task {
-                        await registry.end(phase, id: phaseID)
-                    }
-                }
-            }
             do {
                 let value = try await operation()
+                if blocksRetriesWhileTimedOutOperationActive {
+                    await registry.end(phase, id: phaseID)
+                }
                 guard await race.winOperation() else { return }
                 continuation.yield(value)
                 continuation.finish()
             } catch {
+                if blocksRetriesWhileTimedOutOperationActive {
+                    await registry.end(phase, id: phaseID)
+                }
                 guard await race.winOperation() else { return }
                 continuation.finish(throwing: error)
             }

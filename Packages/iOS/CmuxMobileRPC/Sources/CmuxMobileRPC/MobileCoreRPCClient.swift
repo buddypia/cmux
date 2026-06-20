@@ -14,9 +14,9 @@ public final class MobileCoreRPCClient: MobileSyncing, Sendable {
     private let ticket: CmxAttachTicket
     private let allowsStackAuthFallback: Bool
     private let session: MobileCoreRPCSession
-    private let stackTokenGate = RPCStackTokenGate()
-    private let optionalStackTokenGate = RPCStackTokenGate()
-    private let stackTokenForceRefreshGate = RPCStackTokenGate()
+    private let stackTokenGate: RPCStackTokenGate
+    private let optionalStackTokenGate: RPCStackTokenGate
+    private let stackTokenForceRefreshGate: RPCStackTokenGate
 
     /// Create a client bound to one route + attach ticket.
     /// - Parameters:
@@ -29,13 +29,20 @@ public final class MobileCoreRPCClient: MobileSyncing, Sendable {
         runtime: any MobileSyncRuntime,
         route: CmxAttachRoute,
         ticket: CmxAttachTicket,
-        allowsStackAuthFallback: Bool = false
+        allowsStackAuthFallback: Bool = false,
+        connectAttemptRegistry: MobileRPCConnectAttemptRegistry = MobileRPCConnectAttemptRegistry(),
+        stackTokenGateResetNanoseconds: UInt64 = 30_000_000_000
     ) {
         self.runtime = runtime
         self.route = route
         self.ticket = ticket
         self.allowsStackAuthFallback = allowsStackAuthFallback
+        self.stackTokenGate = RPCStackTokenGate(timedOutResetNanoseconds: stackTokenGateResetNanoseconds)
+        self.optionalStackTokenGate = RPCStackTokenGate(timedOutResetNanoseconds: stackTokenGateResetNanoseconds)
+        self.stackTokenForceRefreshGate = RPCStackTokenGate(timedOutResetNanoseconds: stackTokenGateResetNanoseconds)
         self.session = MobileCoreRPCSession(
+            connectAttemptKey: route.mobileRPCConnectAttemptKey,
+            connectAttemptRegistry: connectAttemptRegistry,
             makeTransport: { [route, runtime] in
                 try runtime.transportFactory.makeTransport(for: route)
             }
@@ -126,6 +133,8 @@ public final class MobileCoreRPCClient: MobileSyncing, Sendable {
             }
         } catch let error as MobileShellConnectionError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw MobileShellConnectionError.authorizationFailed(
                 L10n.string(
@@ -356,5 +365,11 @@ private extension MobileCoreRPCClient {
     func isHostStatusRequest(_ request: [String: Any]) -> Bool {
         let method = (request["method"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return method == "mobile.host.status"
+    }
+}
+
+private extension CmxAttachRoute {
+    var mobileRPCConnectAttemptKey: String {
+        "\(kind.rawValue)|\(id)|\(endpoint.logDescription)"
     }
 }

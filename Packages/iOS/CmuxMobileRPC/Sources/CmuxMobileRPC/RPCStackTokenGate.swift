@@ -1,8 +1,13 @@
 import Foundation
 
 actor RPCStackTokenGate {
-    private var current: (id: UUID, task: Task<String, any Error>, waiters: Int, timedOut: Bool)?
+    private var current: (id: UUID, task: Task<String, any Error>, waiters: Int, timedOutUntil: UInt64?)?
     private let taskTimeout = RPCTaskTimeout()
+    private let timedOutResetNanoseconds: UInt64
+
+    init(timedOutResetNanoseconds: UInt64 = 30_000_000_000) {
+        self.timedOutResetNanoseconds = timedOutResetNanoseconds
+    }
 
     func token(
         timeoutNanoseconds: UInt64,
@@ -11,7 +16,15 @@ actor RPCStackTokenGate {
         let id: UUID
         let task: Task<String, any Error>
         if let existing = current {
-            guard !existing.timedOut else {
+            if let timedOutUntil = existing.timedOutUntil {
+                guard DispatchTime.now().uptimeNanoseconds >= timedOutUntil else {
+                    throw MobileShellConnectionError.requestTimedOut
+                }
+                current = nil
+            }
+        }
+        if let existing = current {
+            guard existing.timedOutUntil == nil else {
                 throw MobileShellConnectionError.requestTimedOut
             }
             id = existing.id
@@ -20,7 +33,7 @@ actor RPCStackTokenGate {
         } else {
             id = UUID()
             task = Task { try await provider() }
-            current = (id: id, task: task, waiters: 1, timedOut: false)
+            current = (id: id, task: task, waiters: 1, timedOutUntil: nil)
             Task.detached { [weak self] in
                 _ = await task.result
                 await self?.clear(id: id)
@@ -49,7 +62,12 @@ actor RPCStackTokenGate {
         guard let waiters = current?.waiters, waiters <= 0 else {
             return
         }
-        current = (id: id, task: task, waiters: 0, timedOut: true)
+        current = (
+            id: id,
+            task: task,
+            waiters: 0,
+            timedOutUntil: DispatchTime.now().uptimeNanoseconds &+ timedOutResetNanoseconds
+        )
         task.cancel()
     }
 
