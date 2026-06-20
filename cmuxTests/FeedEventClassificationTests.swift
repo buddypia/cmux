@@ -115,6 +115,39 @@ struct FeedEventClassificationTests {
         #expect(classify("codex", "PermissionRequest", tool: "shell").actionable == false)
     }
 
+    // MARK: Antigravity
+
+    /// Antigravity's native Feed hooks carry PreToolUse/PostToolUse. Mutating
+    /// tools should surface a permission card; read-only tools stay telemetry.
+    @Test func antigravityPreToolUseEscalatesOnlyMutatingTools() {
+        #expect(classify("antigravity", "PreToolUse", tool: "run_command").name == "PermissionRequest")
+        #expect(classify("antigravity", "PreToolUse", tool: "run_command").actionable == true)
+        #expect(classify("antigravity", "PreToolUse", tool: "read_file").name == "PreToolUse")
+        #expect(classify("antigravity", "PreToolUse", tool: "read_file").actionable == false)
+        #expect(classify("antigravity", "PostToolUse", tool: "run_command").name == "PostToolUse")
+        #expect(classify("antigravity", "PostToolUse", tool: "run_command").actionable == false)
+    }
+
+    /// Antigravity authorization event names are direct approval signals and
+    /// must not depend on a side-effecting tool name being present.
+    @Test func antigravityAuthorizationEventsAreActionable() {
+        #expect(classify("antigravity", "tool_authorization_required").name == "PermissionRequest")
+        #expect(classify("antigravity", "tool_authorization_required").actionable == true)
+        #expect(classify("antigravity", "permission_required", tool: "read_file").name == "PermissionRequest")
+        #expect(classify("antigravity", "permission_required", tool: "read_file").actionable == true)
+        #expect(classify("antigravity", "ask_permission").name == "PermissionRequest")
+        #expect(classify("antigravity", "ask_permission").actionable == true)
+    }
+
+    /// Resolution events are telemetry; they should clear/update Feed state
+    /// without opening a second approval.
+    @Test func antigravityAuthorizationResolutionEventsAreTelemetry() {
+        #expect(classify("antigravity", "tool_authorization_result", tool: "run_command").name == "Notification")
+        #expect(classify("antigravity", "tool_authorization_result", tool: "run_command").actionable == false)
+        #expect(classify("antigravity", "permission_resolved").name == "Notification")
+        #expect(classify("antigravity", "permission_resolved").actionable == false)
+    }
+
     /// Unknown source + unknown event is safe by default.
     @Test func unknownSourceUnknownEventIsSafe() {
         #expect(classify("totally-new-agent", "some_future_event", tool: "Bash").actionable == false)

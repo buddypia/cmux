@@ -80,6 +80,7 @@ Installs supported agent hooks whose binaries are on `PATH`. See [Agent hook int
 | OpenCode     | `~/.config/opencode/plugins/cmux-feed.js` | plugin event bus         |
 | Cursor CLI   | `~/.cursor/hooks.json`                    | beforeShellExecution     |
 | Gemini       | `~/.gemini/settings.json`                 | PreToolUse               |
+| Antigravity  | `~/.gemini/config/hooks.json`             | PreToolUse / PostToolUse |
 | Copilot      | `~/.copilot/config.json`                  | PreToolUse               |
 | CodeBuddy    | `~/.codebuddy/settings.json`              | PreToolUse               |
 | Factory      | `~/.factory/settings.json`                | PreToolUse               |
@@ -94,6 +95,8 @@ Individual agents:
 cmux hooks codex install
 cmux hooks opencode install               # global
 cmux hooks opencode install --project     # .opencode/plugins/cmux-feed.js in cwd
+cmux hooks antigravity install
+cmux hooks agy install
 cmux hooks <agent> uninstall
 ```
 
@@ -114,6 +117,8 @@ Pi, OMP, and Rovo Dev provide lifecycle and session-restore hooks only; they do 
 | Deny   | Deny through the agent's native permission hook.                               |
 
 For Claude Code, the cmux wrapper launches Claude with `--allow-dangerously-skip-permissions`. This does not enable bypass by default, but it lets a later `PermissionRequest` response switch the current session into `bypassPermissions`. Without that launch flag, Claude ignores `setMode: bypassPermissions`.
+
+Antigravity `PreToolUse` hooks surface mutating tools as permission cards and keep read-only tools as telemetry. `PostToolUse` and authorization-resolution events stay telemetry so a resolved tool does not open a second approval.
 
 **Plan-mode decisions**
 

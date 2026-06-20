@@ -183,6 +183,31 @@ struct FeedEventClassifier {
             "SubagentStop": .subagentResponse,
             "Notification": .statusNotification,
         ],
+        "antigravity": [
+            // Antigravity exposes PreToolUse/PostToolUse feed hooks. PreToolUse
+            // is the only prompt-time signal, so mutating tools become
+            // actionable while read-only tools stay telemetry.
+            "PreToolUse": .toolStartMaybeApproval,
+            "PostToolUse": .toolEnd,
+            // Native authorization event names should route directly to the
+            // permission card even when the tool name is absent or read-only.
+            "tool_authorization_required": .approvalRequest,
+            "permission_required": .approvalRequest,
+            "ask_permission": .approvalRequest,
+            "tool_authorization_decision": .statusNotification,
+            "tool_authorization_result": .statusNotification,
+            "tool_authorization_response": .statusNotification,
+            "tool_authorization_resolved": .statusNotification,
+            "permission_decision": .statusNotification,
+            "permission_result": .statusNotification,
+            "permission_response": .statusNotification,
+            "permission_resolved": .statusNotification,
+            "SessionStart": .sessionStart,
+            "SessionEnd": .sessionEnd,
+            "Stop": .response,
+            "turn-completion": .response,
+            "Notification": .statusNotification,
+        ],
         "hermes-agent": [
             // `pre_tool_call` is a tool *starting* — Hermes raises a
             // separate `pre_approval_request` for real approvals, so this

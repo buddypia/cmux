@@ -1,6 +1,6 @@
 # Notifications
 
-cmux provides a notification panel for AI agents like Claude Code, Codex, and OpenCode. Notifications appear in a dedicated panel and trigger macOS system notifications.
+cmux provides a notification panel for AI agents like Claude Code, Codex, Antigravity, and OpenCode. Notifications appear in a dedicated panel and trigger macOS system notifications.
 
 > For inline permission / plan / question approvals directly from the sidebar (Vibe Island-style), see **[Feed](feed.md)**. `cmux hooks setup` installs the Feed bridge alongside the notification hooks covered below.
 
@@ -168,7 +168,7 @@ Or for repo-level hooks, create `.github/hooks/notify.json`:
 
 ### OpenAI Codex
 
-Add to `~/.codex/config.toml`:
+Prefer `cmux hooks setup codex` for the built-in integration. It installs lifecycle notifications, Feed telemetry, and session-restore metadata. For a custom setup, add to `~/.codex/config.toml`:
 
 ```toml
 notify = ["bash", "-c", "command -v cmux &>/dev/null && cmux notify --title Codex --body \"$(echo $1 | jq -r '.\"last-assistant-message\" // \"Turn complete\"' 2>/dev/null | head -c 100)\" || osascript -e 'display notification \"Turn complete\" with title \"Codex\"'", "--"]
@@ -186,6 +186,10 @@ Then use:
 ```toml
 notify = ["bash", "~/.local/bin/codex-notify.sh"]
 ```
+
+### Antigravity
+
+Use `cmux hooks setup antigravity` or `cmux hooks setup agy`. The installer writes Antigravity's native hook group to `~/.gemini/config/hooks.json`, records lifecycle/status notifications, and adds Feed telemetry/approval cards for `PreToolUse` and `PostToolUse`.
 
 ### OpenCode Plugin
 
