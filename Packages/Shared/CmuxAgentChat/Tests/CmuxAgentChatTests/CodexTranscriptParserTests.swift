@@ -269,6 +269,32 @@ struct CodexTranscriptParserTests {
         ))
     }
 
+    @Test("event_msg exec_approval_request maps to a permission request")
+    func execApprovalRequest() {
+        let approval = line(
+            type: "event_msg",
+            payload: [
+                "type": "exec_approval_request",
+                "call_id": "call-approval-1",
+                "name": "exec_command",
+                "command": "rm file.txt",
+            ]
+        )
+
+        let result = parser.parse(lines: [approval], startingSeq: 9)
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == "call-approval-1")
+        #expect(result.messages[0].seq == 9)
+        #expect(result.messages[0].role == .system)
+        #expect(result.messages[0].kind == .permissionRequest(
+            ChatPermissionRequest(
+                title: "Codex needs approval:",
+                subject: "rm file.txt"
+            )
+        ))
+    }
+
     @Test("oversized tool output is truncated to the body budget")
     func truncation() {
         let huge = "Process exited with code 0\nOutput:\n" + String(repeating: "y", count: 40_000)

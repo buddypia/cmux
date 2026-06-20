@@ -50,6 +50,8 @@ The sanitizer preserves model, sandbox, config, and cwd-related flags. It drops 
 
 Grok uses its `Notification` hook for user-facing completion messages. cmux records `Stop` as idle state, but leaves the visible notification text to the `Notification` payload so repeated turns keep Grok's own message instead of a generic completion fallback.
 
+Codex agent chat tails the rollout JSONL and renders `exec_approval_request` events as permission cards so mobile history shows the same approval wait that the Codex TUI is showing. Feed hook behavior stays non-blocking unless Codex is launched through `cmux codex-teams`.
+
 Antigravity uses native `Stop` payload text when present. When the payload only contains `transcriptPath`, cmux reads the recent JSONL transcript tail and uses the last assistant/agent/model message for the completion notification instead of falling back to a generic "session completed" body.
 
 The same recorded Antigravity `transcriptPath` is used by agent chat: cmux tails the JSONL file, renders user and assistant/agent/model prose from current `role`/`parts` rows, pairs function calls/responses into running/completed tool cards, and surfaces `tool_authorization_required` rows as permission cards. Legacy `PreToolUse`/`PostToolUse` lifecycle rows remain supported.

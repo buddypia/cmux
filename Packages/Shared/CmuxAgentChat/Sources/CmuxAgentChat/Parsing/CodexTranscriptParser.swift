@@ -75,6 +75,8 @@ public struct CodexTranscriptParser: Sendable {
                 )
             case "response_item":
                 appendResponseItem(payload, seq: seq, timestamp: timestamp, into: &assembler)
+            case "event_msg":
+                appendEventMessage(payload, seq: seq, timestamp: timestamp, into: &assembler)
             default:
                 continue
             }
@@ -130,6 +132,44 @@ public struct CodexTranscriptParser: Sendable {
         default:
             return
         }
+    }
+
+    private func appendEventMessage(
+        _ payload: TranscriptJSONValue?,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let payload,
+              payload["type"]?.string == "exec_approval_request" else {
+            return
+        }
+        let arguments = approvalArguments(from: payload)
+        let command = payload["command"]?.string
+            ?? payload["cmd"]?.string
+            ?? shellCommand(arguments: arguments, payload: payload)
+        let subject = command
+            ?? arguments.flatMap { value -> String? in
+                let json = value.compactJSONString()
+                return json == "{}" ? nil : json
+            }
+            ?? payload["name"]?.string
+            ?? payload["tool_name"]?.string
+            ?? "Codex tool"
+        assembler.append(
+            ChatMessage(
+                id: payload["call_id"]?.string ?? "line-\(seq)",
+                seq: seq,
+                role: .system,
+                timestamp: timestamp,
+                kind: .permissionRequest(
+                    ChatPermissionRequest(
+                        title: "Codex needs approval:",
+                        subject: budget.summaryArgument(subject)
+                    )
+                )
+            )
+        )
     }
 
     private func appendMessage(
@@ -328,6 +368,19 @@ public struct CodexTranscriptParser: Sendable {
             return strings[2...].joined(separator: " ")
         }
         return strings.joined(separator: " ")
+    }
+
+    private func approvalArguments(from payload: TranscriptJSONValue) -> TranscriptJSONValue? {
+        if let raw = payload["arguments"]?.string,
+           let parsed = TranscriptJSONValue(jsonLine: raw) {
+            return parsed
+        }
+        for key in ["params", "parameters"] {
+            if payload[key]?.object != nil {
+                return payload[key]
+            }
+        }
+        return nil
     }
 
     private func firstPatchedFile(in patch: String) -> String? {
