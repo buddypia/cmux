@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CryptoKit
+import Darwin
 
 #if canImport(cmux_DEV)
     @testable import cmux_DEV
@@ -64,6 +65,13 @@ import CryptoKit
 
     private static func sha256Hex(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func canonicalPath(_ url: URL) -> String {
+        let path = url.path
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     @Test("returns the newest transcript when nothing is claimed")
@@ -160,7 +168,7 @@ import CryptoKit
         let resolver = AgentChatTranscriptResolver(homeDirectory: home)
         let record = Self.antigravityRecord(sessionID: "eriepr", cwd: cwd.path)
 
-        #expect(resolver.transcriptPath(for: record) == transcript.path)
+        #expect(resolver.transcriptPath(for: record) == Self.canonicalPath(transcript))
     }
 
     @Test("Antigravity fallback finds single-object JSON by sessionId")
@@ -190,7 +198,7 @@ import CryptoKit
         let resolver = AgentChatTranscriptResolver(homeDirectory: home)
         let record = Self.antigravityRecord(sessionID: "agy-json-session", cwd: cwd.path)
 
-        #expect(resolver.transcriptPath(for: record) == transcript.path)
+        #expect(resolver.transcriptPath(for: record) == Self.canonicalPath(transcript))
     }
 
     @Test("Antigravity fallback finds older hash JSONL by top-level sessionId")
@@ -212,6 +220,6 @@ import CryptoKit
         let resolver = AgentChatTranscriptResolver(homeDirectory: home)
         let record = Self.antigravityRecord(sessionID: "native-session-123", cwd: cwd.path)
 
-        #expect(resolver.transcriptPath(for: record) == transcript.path)
+        #expect(resolver.transcriptPath(for: record) == Self.canonicalPath(transcript))
     }
 }

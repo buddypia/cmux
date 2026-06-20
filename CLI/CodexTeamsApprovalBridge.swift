@@ -221,6 +221,67 @@ enum CodexTeamsApprovalBridge {
         source != "codex" && source != "claude" && source != "hermes-agent"
     }
 
+    static func antigravityPermissionResultMode(rawEvent: String, rawObject: [String: Any]) -> String? {
+        let event = normalizedFeedEventName(rawEvent)
+        guard [
+            "toolauthorizationresult",
+            "toolauthorizationdecision",
+            "toolauthorizationresponse",
+            "toolauthorizationresolved",
+            "permissionresult",
+            "permissiondecision",
+            "permissionresponse",
+            "permissionresolved",
+        ].contains(event) else { return nil }
+
+        if let approved = boolValue(in: rawObject, keys: ["approved", "allowed", "allow"]) {
+            return approved ? "once" : "deny"
+        }
+        if let denied = boolValue(in: rawObject, keys: ["denied", "rejected", "blocked"]) {
+            return denied ? "deny" : "once"
+        }
+        for key in ["decision", "resolution", "status", "outcome", "result"] {
+            guard let value = stringValue(in: rawObject, keys: [key]) else { continue }
+            switch normalizedFeedEventName(value) {
+            case "approve", "approved", "allow", "allowed", "accept", "accepted",
+                 "grant", "granted", "ok", "success", "succeeded":
+                return "once"
+            case "deny", "denied", "reject", "rejected", "block", "blocked",
+                 "error", "failed", "failure", "cancel", "cancelled", "canceled":
+                return "deny"
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    static func feedRequestId(
+        rawObject: [String: Any],
+        source: String,
+        sessionId: String,
+        rawEvent: String,
+        toolName: String,
+        timestampMilliseconds: Int
+    ) -> String {
+        if let explicit = stringValue(in: rawObject, keys: ["_opencode_request_id"]) {
+            return explicit
+        }
+        if let direct = stringValue(in: rawObject, keys: [
+            "request_id", "requestId", "toolCallId", "tool_call_id",
+            "tool_use_id", "toolUseID", "call_id", "callId",
+        ]) {
+            return direct
+        }
+        if let toolCall = rawObject["toolCall"] as? [String: Any],
+           let nested = stringValue(in: toolCall, keys: [
+                "id", "toolCallId", "tool_call_id", "call_id", "callId",
+           ]) {
+            return nested
+        }
+        return "\(source)-\(sessionId)-\(rawEvent)-\(toolName)-\(timestampMilliseconds)"
+    }
+
     static func requestIdString(_ requestId: Any) -> String {
         if let string = requestId as? String {
             return string
@@ -241,6 +302,32 @@ enum CodexTeamsApprovalBridge {
             }
         }
         return nil
+    }
+
+    private static func boolValue(in object: [String: Any], keys: [String]) -> Bool? {
+        for key in keys {
+            guard let value = object[key] else { continue }
+            if let bool = value as? Bool {
+                return bool
+            }
+            if let string = value as? String {
+                switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "true", "yes", "1":
+                    return true
+                case "false", "no", "0":
+                    return false
+                default:
+                    continue
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func normalizedFeedEventName(_ value: String) -> String {
+        value
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 
     private static func commandApprovalDecision(params: [String: Any], mode: String) -> Any {

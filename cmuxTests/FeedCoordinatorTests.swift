@@ -401,10 +401,8 @@ struct FeedCoordinatorTests {
     }
 
     @Test func feedRequestIdKeepsAntigravityToolCallIdentifiers() {
-        let cli = CMUXCLI(args: [])
-
         #expect(
-            cli.feedRequestId(
+            CodexTeamsApprovalBridge.feedRequestId(
                 rawObject: [
                     "toolCallId": "antigravity-call-010",
                     "name": "tool_authorization_required",
@@ -417,7 +415,7 @@ struct FeedCoordinatorTests {
             ) == "antigravity-call-010"
         )
         #expect(
-            cli.feedRequestId(
+            CodexTeamsApprovalBridge.feedRequestId(
                 rawObject: [
                     "tool_call_id": "antigravity-call-011",
                     "name": "tool_authorization_result",
@@ -430,7 +428,7 @@ struct FeedCoordinatorTests {
             ) == "antigravity-call-011"
         )
         #expect(
-            cli.feedRequestId(
+            CodexTeamsApprovalBridge.feedRequestId(
                 rawObject: [
                     "toolCall": [
                         "id": "nested-call-1",
@@ -444,7 +442,7 @@ struct FeedCoordinatorTests {
             ) == "nested-call-1"
         )
         #expect(
-            cli.feedRequestId(
+            CodexTeamsApprovalBridge.feedRequestId(
                 rawObject: [:],
                 source: "antigravity",
                 sessionId: "session-1",
@@ -456,34 +454,32 @@ struct FeedCoordinatorTests {
     }
 
     @Test func antigravityPermissionResultModeMapsNativeDecisionsToFeedReplies() {
-        let cli = CMUXCLI(args: [])
-
         #expect(
-            cli.antigravityPermissionResultMode(
+            CodexTeamsApprovalBridge.antigravityPermissionResultMode(
                 rawEvent: "tool_authorization_result",
                 rawObject: ["decision": "approved"]
             ) == "once"
         )
         #expect(
-            cli.antigravityPermissionResultMode(
+            CodexTeamsApprovalBridge.antigravityPermissionResultMode(
                 rawEvent: "permission_result",
                 rawObject: ["denied": true]
             ) == "deny"
         )
         #expect(
-            cli.antigravityPermissionResultMode(
+            CodexTeamsApprovalBridge.antigravityPermissionResultMode(
                 rawEvent: "tool_authorization_decision",
                 rawObject: ["allowed": "false"]
             ) == "deny"
         )
         #expect(
-            cli.antigravityPermissionResultMode(
+            CodexTeamsApprovalBridge.antigravityPermissionResultMode(
                 rawEvent: "tool_authorization_required",
                 rawObject: ["decision": "approved"]
             ) == nil
         )
         #expect(
-            cli.antigravityPermissionResultMode(
+            CodexTeamsApprovalBridge.antigravityPermissionResultMode(
                 rawEvent: "permission_result",
                 rawObject: ["status": "pending"]
             ) == nil
