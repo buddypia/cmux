@@ -2800,6 +2800,7 @@ struct CMUXCLI {
         Usage: cmux pilot select --option <n> [flags]
                cmux pilot select <n> [flags]
                cmux pilot inspect [flags]
+               cmux pilot submit [flags]
 
         Inspect or drive a detected Pilot TUI menu on a terminal surface through
         the live cmux socket.
@@ -2817,6 +2818,7 @@ struct CMUXCLI {
         Examples:
           cmux pilot inspect --json
           cmux pilot select --option 2
+          cmux pilot submit
           cmux pilot select 1 --surface surface:2 --confidence 0.92 --json
         """
 
@@ -3095,6 +3097,13 @@ struct CMUXCLI {
                 jsonOutput: jsonOutput,
                 windowOverride: windowOverride
             )
+        case "submit":
+            try runPilotSubmitCommand(
+                arguments: Array(commandArgs.dropFirst()),
+                client: client,
+                jsonOutput: jsonOutput,
+                windowOverride: windowOverride
+            )
         case "select":
             try runPilotSelectCommand(
                 arguments: Array(commandArgs.dropFirst()),
@@ -3109,20 +3118,27 @@ struct CMUXCLI {
         }
     }
 
+    private func validatePilotSurfaceArguments(
+        _ arguments: [String],
+        commandName: String
+    ) throws -> String? {
+        let (linesArg, rem0) = parseOption(arguments, name: "--lines")
+        let (_, rem1) = parseOption(rem0, name: "--workspace")
+        let (_, rem2) = parseOption(rem1, name: "--surface")
+        let (_, rem3) = parseOption(rem2, name: "--window")
+        guard rem3.isEmpty else {
+            throw CLIError(message: "\(commandName): unexpected arguments: \(rem3.joined(separator: " "))")
+        }
+        return linesArg
+    }
+
     private func runPilotInspectCommand(
         arguments: [String],
         client: SocketClient,
         jsonOutput: Bool,
         windowOverride: String?
     ) throws {
-        let (linesArg, rem0) = parseOption(arguments, name: "--lines")
-        let (_, rem1) = parseOption(rem0, name: "--workspace")
-        let (_, rem2) = parseOption(rem1, name: "--surface")
-        let (_, rem3) = parseOption(rem2, name: "--window")
-        guard rem3.isEmpty else {
-            throw CLIError(message: "pilot inspect: unexpected arguments: \(rem3.joined(separator: " "))")
-        }
-
+        let linesArg = try validatePilotSurfaceArguments(arguments, commandName: "pilot inspect")
         let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
         let driver = try makePilotSurfaceDriver(
             arguments: arguments,
@@ -3140,6 +3156,38 @@ struct CMUXCLI {
             print(try pilotJSON(inspection))
         } else {
             print(pilotInspectionSummary(inspection))
+        }
+    }
+
+    private func runPilotSubmitCommand(
+        arguments: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        windowOverride: String?
+    ) throws {
+        let linesArg = try validatePilotSurfaceArguments(arguments, commandName: "pilot submit")
+        let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
+        let driver = try makePilotSurfaceDriver(
+            arguments: arguments,
+            client: client,
+            windowOverride: windowOverride
+        )
+        let result = try runSynchronousPilotTask {
+            try await PilotTuiAutoSelector.run(
+                driver: driver,
+                request: PilotTuiAutoSelectRequest(
+                    targetNumber: nil,
+                    confidence: 1,
+                    readLines: readLines,
+                    submitIfReady: true
+                )
+            )
+        }
+
+        if jsonOutput {
+            print(jsonString(pilotSelectPayload(result)))
+        } else {
+            print(pilotSelectSummary(result))
         }
     }
 
@@ -34464,7 +34512,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>]
           feedback [--email <email> --body <text> [--image <path> ...]]
           feed tui|clear
-          pilot inspect|select [--option <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
+          pilot inspect|select|submit [--option <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           themes [list|set|clear]
           claude-teams [claude-args...]
           codex-teams [codex-args...]
@@ -34534,6 +34582,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           read-screen [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--scrollback] [--lines <n>]
           pilot inspect [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           pilot select --option <n> [--confidence <0...1>] [--required-confidence <0...1>] [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
+          pilot submit [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           send [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <text>
           send-key [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <key>
           send-panel --panel <id|ref|index> [--workspace <id|ref|index>] [--window <id|ref|index>] <text>
