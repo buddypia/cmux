@@ -455,6 +455,41 @@ struct FeedCoordinatorTests {
         )
     }
 
+    @Test func antigravityPermissionResultModeMapsNativeDecisionsToFeedReplies() {
+        let cli = CMUXCLI(args: [])
+
+        #expect(
+            cli.antigravityPermissionResultMode(
+                rawEvent: "tool_authorization_result",
+                rawObject: ["decision": "approved"]
+            ) == "once"
+        )
+        #expect(
+            cli.antigravityPermissionResultMode(
+                rawEvent: "permission_result",
+                rawObject: ["denied": true]
+            ) == "deny"
+        )
+        #expect(
+            cli.antigravityPermissionResultMode(
+                rawEvent: "tool_authorization_decision",
+                rawObject: ["allowed": "false"]
+            ) == "deny"
+        )
+        #expect(
+            cli.antigravityPermissionResultMode(
+                rawEvent: "tool_authorization_required",
+                rawObject: ["decision": "approved"]
+            ) == nil
+        )
+        #expect(
+            cli.antigravityPermissionResultMode(
+                rawEvent: "permission_result",
+                rawObject: ["status": "pending"]
+            ) == nil
+        )
+    }
+
     @Test func codexApprovalItemSnapshotStripsLargePayloads() throws {
         let snapshot = CodexTeamsApprovalBridge.approvalItemSnapshot([
             "id": "call-1",

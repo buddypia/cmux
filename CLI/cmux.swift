@@ -32875,6 +32875,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
             toolName: toolName
         )
         eventDict["_opencode_request_id"] = requestId
+        let autoReplyMode = antigravityPermissionResultMode(rawEvent: rawEvent, rawObject: stdinObj)
 
         // Sync. For actionable events we block up to 120s waiting
         // for the user's Feed click; the hook's stdout is then a
@@ -32903,6 +32904,18 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
         let line = String(data: payload, encoding: .utf8) ?? "{}"
 
         if waitTimeout == 0 {
+            if let autoReplyMode,
+               let replyLine = feedPermissionReplyLine(requestId: requestId, mode: autoReplyMode) {
+                if let client {
+                    _ = try? client.sendOneWay(command: replyLine, writeTimeout: 0.05)
+                } else if let socketPath {
+                    sendBestEffortFeedTelemetry(
+                        socketPath: socketPath,
+                        line: replyLine,
+                        socketPassword: socketPassword
+                    )
+                }
+            }
             if let client {
                 _ = try? client.sendOneWay(command: line, writeTimeout: 0.05)
             } else if let socketPath {
@@ -32981,6 +32994,41 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
         print("{}")
     }
 
+    func antigravityPermissionResultMode(rawEvent: String, rawObject: [String: Any]) -> String? {
+        let event = normalizedFeedEventName(rawEvent)
+        guard [
+            "toolauthorizationresult",
+            "toolauthorizationdecision",
+            "toolauthorizationresponse",
+            "toolauthorizationresolved",
+            "permissionresult",
+            "permissiondecision",
+            "permissionresponse",
+            "permissionresolved",
+        ].contains(event) else { return nil }
+
+        if let approved = firstBool(in: rawObject, keys: ["approved", "allowed", "allow"]) {
+            return approved ? "once" : "deny"
+        }
+        if let denied = firstBool(in: rawObject, keys: ["denied", "rejected", "blocked"]) {
+            return denied ? "deny" : "once"
+        }
+        for key in ["decision", "resolution", "status", "outcome", "result"] {
+            guard let value = firstString(in: rawObject, keys: [key]) else { continue }
+            switch normalizedFeedEventName(value) {
+            case "approve", "approved", "allow", "allowed", "accept", "accepted",
+                 "grant", "granted", "ok", "success", "succeeded":
+                return "once"
+            case "deny", "denied", "reject", "rejected", "block", "blocked",
+                 "error", "failed", "failure", "cancel", "cancelled", "canceled":
+                return "deny"
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
     func feedRequestId(
         rawObject: [String: Any],
         source: String,
@@ -33005,6 +33053,44 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
             return nested
         }
         return "\(source)-\(sessionId)-\(rawEvent)-\(toolName)-\(timestampMilliseconds)"
+    }
+
+    private func feedPermissionReplyLine(requestId: String, mode: String) -> String? {
+        let request: [String: Any] = [
+            "method": "feed.permission.reply",
+            "params": [
+                "request_id": requestId,
+                "mode": mode,
+            ],
+        ]
+        guard let payload = try? JSONSerialization.data(withJSONObject: request) else { return nil }
+        return String(data: payload, encoding: .utf8)
+    }
+
+    private func firstBool(in object: [String: Any], keys: [String]) -> Bool? {
+        for key in keys {
+            guard let value = object[key] else { continue }
+            if let bool = value as? Bool {
+                return bool
+            }
+            if let string = value as? String {
+                switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+                case "true", "yes", "1":
+                    return true
+                case "false", "no", "0":
+                    return false
+                default:
+                    continue
+                }
+            }
+        }
+        return nil
+    }
+
+    private func normalizedFeedEventName(_ value: String) -> String {
+        value
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 
     private static func shouldSuppressKiroFeedEvent(
