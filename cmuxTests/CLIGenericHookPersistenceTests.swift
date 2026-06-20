@@ -429,6 +429,40 @@ extension CLINotifyProcessIntegrationRegressionTests {
             "Antigravity idle notifications must not reset the shared status while another background session is running, saw \(missingFullyIdleNotificationCommands)"
         )
 
+        let transcriptSessionId = "\(sessionId)-transcript"
+        let transcriptURL = root.appendingPathComponent("antigravity-transcript.jsonl", isDirectory: false)
+        let transcriptBody = "Updated the docs from the Antigravity transcript."
+        try """
+        {"role":"user","content":"Update the docs"}
+        {"role":"assistant","content":[{"type":"text","text":"\(transcriptBody)"}]}
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let transcriptStart = runAntigravityHook(
+            "session-start",
+            input: #"{"conversationId":"\#(transcriptSessionId)","workspacePaths":["\#(root.path)"],"transcriptPath":"\#(transcriptURL.path)","hook_event_name":"SessionStart"}"#
+        )
+        XCTAssertFalse(transcriptStart.timedOut, transcriptStart.stderr)
+        XCTAssertEqual(transcriptStart.status, 0, transcriptStart.stderr)
+        XCTAssertEqual(transcriptStart.stdout, "{}\n")
+
+        let transcriptStopCommandStart = state.commands.count
+        let transcriptStop = runAntigravityHook(
+            "stop",
+            input: #"{"conversationId":"\#(transcriptSessionId)","workspacePaths":["\#(root.path)"],"transcriptPath":"\#(transcriptURL.path)","hook_event_name":"Stop","terminationReason":"model_stop","fullyIdle":true}"#
+        )
+        XCTAssertFalse(transcriptStop.timedOut, transcriptStop.stderr)
+        XCTAssertEqual(transcriptStop.status, 0, transcriptStop.stderr)
+        XCTAssertEqual(transcriptStop.stdout, "{}\n")
+
+        let transcriptStopCommands = Array(state.commands.dropFirst(transcriptStopCommandStart))
+        XCTAssertTrue(
+            transcriptStopCommands.contains {
+                $0.contains("notify_target_async \(workspaceId) \(surfaceId) Antigravity|Completed in ")
+                    && $0.contains(transcriptBody)
+            },
+            "Expected Antigravity Stop to summarize the transcript when the payload has no assistant message, saw \(transcriptStopCommands)"
+        )
+
         let stopMessage = "Antigravity finished updating docs"
         let stopCommandStart = state.commands.count
         let stop = runAntigravityHook(

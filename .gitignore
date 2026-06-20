@@ -55,6 +55,7 @@ web/public/pagefind/
 docs/index.md
 
 # Local scratch (screenshots, etc.)
+.tmp/
 tmp/
 tmp-*/
 .iter-logs/

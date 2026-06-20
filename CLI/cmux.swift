@@ -24332,6 +24332,56 @@ struct CMUXCLI {
         return TranscriptSummary(lastAssistantMessage: lastAssistantMessage)
     }
 
+    private func readAgentTranscriptSummary(path: String) -> TranscriptSummary? {
+        guard let lines = readRecentTextFileLines(path: path, maxBytes: 1_048_576) else { return nil }
+
+        var lastAssistantMessage: String?
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let lineData = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let text = assistantTranscriptText(from: object),
+                  !text.isEmpty else {
+                continue
+            }
+            lastAssistantMessage = truncate(normalizedSingleLine(text), maxLength: 120)
+        }
+
+        guard lastAssistantMessage != nil else { return nil }
+        return TranscriptSummary(lastAssistantMessage: lastAssistantMessage)
+    }
+
+    private func assistantTranscriptText(from object: [String: Any]) -> String? {
+        let containers: [[String: Any]] = [
+            object,
+            object["message"] as? [String: Any],
+            object["payload"] as? [String: Any],
+            object["data"] as? [String: Any],
+        ].compactMap { $0 }
+
+        for container in containers {
+            let role = firstString(in: container, keys: ["role", "author", "speaker"])?.lowercased()
+            let type = firstString(in: container, keys: ["type", "kind"])?.lowercased()
+            let isAssistant =
+                role == "assistant" || role == "agent" || role == "model" ||
+                type == "assistant" || type == "assistant_message" ||
+                type == "agent" || type == "agent_message"
+            guard isAssistant else { continue }
+
+            if let text = extractMessageText(from: container), !text.isEmpty {
+                return text
+            }
+            if let text = firstString(in: container, keys: ["text", "body", "summary"]) {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+
+        return nil
+    }
+
     private struct CodexHookFailureSummary {
         let statusValue: String
         let subtitle: String
@@ -25498,7 +25548,8 @@ struct CMUXCLI {
         }
         if let contentArray = message["content"] as? [[String: Any]] {
             let texts = contentArray.compactMap { block -> String? in
-                guard (block["type"] as? String) == "text",
+                guard let type = block["type"] as? String,
+                      type == "text" || type == "output_text",
                       let text = block["text"] as? String else { return nil }
                 return text.trimmingCharacters(in: .whitespacesAndNewlines)
             }
@@ -30087,6 +30138,13 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
                 )
             }()
             let lastMsg = claudeAssistantMessageFromHookPayload(input.object)
+            let antigravityTranscriptMessage: String? = {
+                guard def.name == "antigravity",
+                      antigravityFailure == nil,
+                      let transcriptPath = normalizedHookValue(input.transcriptPath ?? mapped?.transcriptPath)
+                else { return nil }
+                return readAgentTranscriptSummary(path: transcriptPath)?.lastAssistantMessage
+            }()
             let projectName: String? = {
                 guard let cwd, !cwd.isEmpty else { return nil }
                 return URL(fileURLWithPath: NSString(string: cwd).expandingTildeInPath).lastPathComponent
@@ -30110,6 +30168,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
             let body = codexFailure?.body
                 ?? antigravityFailure?.body
                 ?? lastMsg.map { truncate(normalizedSingleLine($0), maxLength: 200) }
+                ?? antigravityTranscriptMessage.map { truncate(normalizedSingleLine($0), maxLength: 200) }
                 ?? grokAssistantMessage.map { truncate(normalizedSingleLine($0), maxLength: 200) }
                 ?? String.localizedStringWithFormat(
                     String(
