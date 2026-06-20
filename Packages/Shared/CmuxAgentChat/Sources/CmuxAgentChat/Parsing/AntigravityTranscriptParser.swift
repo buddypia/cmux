@@ -48,11 +48,14 @@ public struct AntigravityTranscriptParser: Sendable {
                 continue
             }
             if let stamped = timestamps.date(from: firstString(in: root, keys: [
-                "timestamp", "created_at", "createdAt", "time",
+                "timestamp", "created_at", "createdAt", "time", "startTime", "lastUpdated",
             ])) {
                 lastTimestamp = stamped
             }
             let timestamp = lastTimestamp ?? Date(timeIntervalSince1970: 0)
+            if appendCurrentAgyRecord(root, seq: seq, timestamp: timestamp, into: &assembler) {
+                continue
+            }
             if appendRolePartsRecord(root, seq: seq, timestamp: timestamp, into: &assembler) {
                 continue
             }
@@ -144,6 +147,85 @@ public struct AntigravityTranscriptParser: Sendable {
     }
 
     // MARK: - Messages
+
+    private func appendCurrentAgyRecord(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) -> Bool {
+        if root["type"] == nil,
+           root["sessionId"]?.string != nil,
+           root["projectHash"]?.string != nil {
+            appendSessionStart(root, seq: seq, timestamp: timestamp, into: &assembler)
+            return true
+        }
+        switch root["type"]?.string?.lowercased() {
+        case "gemini":
+            appendCurrentAgyGemini(root, seq: seq, timestamp: timestamp, into: &assembler)
+            return true
+        case "user":
+            guard let text = currentAgyContentText(root["content"]),
+                  !Self.userNoisePrefixes.contains(where: { text.hasPrefix($0) })
+            else { return true }
+            assembler.append(
+                ChatMessage(
+                    id: lineID(root, seq: seq),
+                    seq: seq,
+                    role: .user,
+                    timestamp: timestamp,
+                    kind: .prose(ChatProse(text: budget.body(text)))
+                )
+            )
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func appendCurrentAgyGemini(
+        _ root: TranscriptJSONValue,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        if let text = currentAgyContentText(root["content"]) {
+            assembler.append(
+                ChatMessage(
+                    id: partLineID(root, seq: seq, label: "text", index: 0),
+                    seq: seq,
+                    role: .agent,
+                    timestamp: timestamp,
+                    kind: .prose(ChatProse(text: budget.body(text)))
+                )
+            )
+        }
+        for (index, thought) in (root["thoughts"]?.array ?? []).enumerated() {
+            guard let text = nonEmpty(thought["description"]?.string ?? thought["text"]?.string) else {
+                continue
+            }
+            assembler.append(
+                ChatMessage(
+                    id: partLineID(root, seq: seq, label: "thought", index: index),
+                    seq: seq,
+                    role: .agent,
+                    timestamp: timestamp,
+                    kind: .thought(ChatThought(text: budget.body(text)))
+                )
+            )
+        }
+        for call in root["toolCalls"]?.array ?? [] {
+            guard let callID = toolCallID(root: root, call: call) else { continue }
+            appendToolInvocation(
+                root: root,
+                call: call,
+                seq: seq,
+                timestamp: timestamp,
+                into: &assembler
+            )
+            assembler.resolve(key: callID, completion: currentAgyCompletion(from: call))
+        }
+    }
 
     private func appendRolePartsRecord(
         _ root: TranscriptJSONValue,
@@ -541,6 +623,31 @@ public struct AntigravityTranscriptParser: Sendable {
 
     // MARK: - Helpers
 
+    private func currentAgyContentText(_ value: TranscriptJSONValue?) -> String? {
+        guard let value else { return nil }
+        if let text = nonEmpty(value.string) {
+            return text
+        }
+        let texts = (value.array ?? []).compactMap { part -> String? in
+            nonEmpty(part.string ?? part["text"]?.string ?? part["content"]?.string)
+        }
+        return texts.isEmpty ? nil : texts.joined(separator: " ")
+    }
+
+    private func currentAgyCompletion(from call: TranscriptJSONValue) -> TranscriptToolCompletion {
+        let status = call["status"]?.string?.lowercased()
+        let isError = status.map { $0 != "success" && $0 != "ok" && $0 != "succeeded" } ?? false
+        let result = call["result"]
+        let output = firstString(in: call, keys: ["output", "stdout", "stderr", "message"])
+            ?? currentAgyContentText(result)
+            ?? result?.compactJSONString()
+        return TranscriptToolCompletion(
+            output: nonEmpty(output),
+            isError: isError,
+            exitCode: isError ? 1 : 0
+        )
+    }
+
     private func containers(from root: TranscriptJSONValue) -> [TranscriptJSONValue] {
         [
             root,
@@ -590,7 +697,8 @@ public struct AntigravityTranscriptParser: Sendable {
     }
 
     private func lineID(_ root: TranscriptJSONValue, seq: Int) -> String {
-        firstString(in: root, keys: ["uuid", "id", "messageId", "message_id"]) ?? "line-\(seq)"
+        firstString(in: root, keys: ["uuid", "id", "messageId", "message_id", "sessionId", "conversationId"])
+            ?? "line-\(seq)"
     }
 
     private func partLineID(_ root: TranscriptJSONValue, seq: Int, label: String, index: Int) -> String {

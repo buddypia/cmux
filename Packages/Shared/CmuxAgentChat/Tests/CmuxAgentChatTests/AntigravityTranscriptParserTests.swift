@@ -38,6 +38,65 @@ struct AntigravityTranscriptParserTests {
         return Self.json(object)
     }
 
+    @Test("current agy metadata JSONL maps to session start")
+    func currentAgyMetadata() {
+        let line = Self.json([
+            "sessionId": "current-agy-session",
+            "projectHash": "project-hash",
+            "startTime": "2026-06-12T00:00:00.000Z",
+            "lastUpdated": "2026-06-12T00:00:00.000Z",
+            "kind": "main",
+        ])
+
+        let result = parser.parse(lines: [line], startingSeq: 4)
+
+        #expect(result.messages.count == 1)
+        #expect(result.messages[0].id == "current-agy-session")
+        #expect(result.messages[0].role == .system)
+        #expect(result.messages[0].kind == .status(
+            ChatStatusTransition(event: .sessionStarted, detail: nil)
+        ))
+    }
+
+    @Test("current agy gemini JSONL maps content thoughts and completed tool calls")
+    func currentAgyGeminiMessage() {
+        let line = Self.json([
+            "id": "msg-gemini-1",
+            "timestamp": "2026-06-12T00:00:02.000Z",
+            "type": "gemini",
+            "content": "done",
+            "thoughts": [
+                ["subject": "plan", "description": "thinking step 1"],
+                ["subject": "plan", "description": "thinking step 2"],
+            ],
+            "toolCalls": [
+                [
+                    "id": "run_shell_command_1",
+                    "name": "run_shell_command",
+                    "args": ["command": "pwd"],
+                    "status": "success",
+                    "timestamp": "2026-06-12T00:00:02.000Z",
+                ],
+            ],
+            "model": "gemini-3.1-pro-preview",
+        ])
+
+        let result = parser.parse(lines: [line], startingSeq: 5)
+
+        #expect(result.messages.count == 4)
+        #expect(result.messages[0].kind == .prose(ChatProse(text: "done")))
+        #expect(result.messages[1].kind == .thought(ChatThought(text: "thinking step 1")))
+        #expect(result.messages[2].kind == .thought(ChatThought(text: "thinking step 2")))
+        guard case .terminal(let capture) = result.messages[3].kind else {
+            Issue.record("expected current agy toolCall to map to terminal")
+            return
+        }
+        #expect(result.messages[3].id == "run_shell_command_1")
+        #expect(capture.command == "pwd")
+        #expect(!capture.isRunning)
+        #expect(capture.exitCode == 0)
+    }
+
     @Test("current role/parts JSONL maps a typical Antigravity turn")
     func rolePartsTypicalTurn() {
         let lines = [
