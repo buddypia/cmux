@@ -8,6 +8,9 @@ import Foundation
 /// is derived from replay metadata plus Ghostty retention observations in one
 /// place instead of scattered UIKit fields.
 public struct MobileTerminalLocalScrollbackModel: Equatable, Sendable {
+    private static let bottomAnchorToleranceRows = 0.5
+    private static let retentionAccountingSlackRows: UInt64 = 1
+
     public struct BoundsResult: Equatable, Sendable {
         public let rowOffset: Double
         public let maxRowOffset: Double
@@ -42,7 +45,7 @@ public struct MobileTerminalLocalScrollbackModel: Equatable, Sendable {
     public init() {}
 
     public var isViewingLiveBottom: Bool {
-        activeScreen != .primary || maxRowOffset <= 0 || abs(rowOffset - maxRowOffset) < 0.5
+        activeScreen != .primary || maxRowOffset <= 0 || isOffsetAtBottom(rowOffset, maxRowOffset)
     }
 
     public mutating func applyMetadata(
@@ -54,7 +57,7 @@ public struct MobileTerminalLocalScrollbackModel: Equatable, Sendable {
         }
         guard let scrollbackRows else { return nil }
 
-        let wasAtBottom = !boundsInitialized || abs(rowOffset - maxRowOffset) < 0.5
+        let wasAtBottom = !boundsInitialized || isOffsetAtBottom(rowOffset, maxRowOffset)
         anchorToBottomOnNextBounds = wasAtBottom
         replayScrollbackRows = max(0, scrollbackRows)
         if wasAtBottom, boundsInitialized {
@@ -83,12 +86,13 @@ public struct MobileTerminalLocalScrollbackModel: Equatable, Sendable {
         visibleRows = len
         let observedMax = total > len ? Double(total - len) : 0
         let expectedTotal = UInt64(max(0, replayScrollbackRows)) + len
-        mirrorTruncated = replayScrollbackRows > 0 && total + 1 < expectedTotal
+        mirrorTruncated = replayScrollbackRows > 0
+            && total + Self.retentionAccountingSlackRows < expectedTotal
         let nextMax = mirrorTruncated ? observedMax : max(observedMax, Double(replayScrollbackRows))
         let previousMax = maxRowOffset
         let wasAtBottom = !boundsInitialized
             || anchorToBottomOnNextBounds
-            || abs(rowOffset - previousMax) < 0.5
+            || isOffsetAtBottom(rowOffset, previousMax)
 
         maxRowOffset = nextMax
         boundsInitialized = true
@@ -125,5 +129,9 @@ public struct MobileTerminalLocalScrollbackModel: Equatable, Sendable {
         mirrorTruncated = false
         boundsInitialized = false
         anchorToBottomOnNextBounds = false
+    }
+
+    private func isOffsetAtBottom(_ offset: Double, _ maxOffset: Double) -> Bool {
+        abs(offset - maxOffset) < Self.bottomAnchorToleranceRows
     }
 }

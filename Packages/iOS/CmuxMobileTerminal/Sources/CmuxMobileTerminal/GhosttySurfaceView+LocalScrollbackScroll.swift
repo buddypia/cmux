@@ -3,8 +3,6 @@ import CmuxMobileDiagnostics
 import GhosttyKit
 import UIKit
 
-nonisolated(unsafe) private var lastLocalScrollViewportLogTime: CFTimeInterval = 0
-
 extension GhosttySurfaceView {
     var isViewingLiveBottom: Bool {
         localScrollbackModel.isViewingLiveBottom
