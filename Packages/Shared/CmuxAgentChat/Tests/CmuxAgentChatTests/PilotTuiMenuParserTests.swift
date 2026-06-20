@@ -323,6 +323,43 @@ struct PilotTuiMenuParserTests {
         #expect(driver.keys.isEmpty)
     }
 
+    @Test("inspector reports parsed menu and submit-bar status")
+    func inspectorReportsMenuStatus() throws {
+        let menuInspection = PilotTuiInspector.inspect(screen: multi)
+        #expect(menuInspection.status == .menu)
+        #expect(menuInspection.menu?.question == "State B のとき create-pr 유도 강도는?")
+        #expect(menuInspection.menu?.options.map(\.number) == [1, 2, 3, 4, 5])
+        #expect(menuInspection.submitBar?.isReadyToSubmit == false)
+
+        let readyInspection = PilotTuiInspector.inspect(screen: preShipReady)
+        #expect(readyInspection.status == .submitReady)
+        #expect(readyInspection.submitBar?.isReadyToSubmit == true)
+
+        let emptyInspection = PilotTuiInspector.inspect(screen: "plain terminal output")
+        #expect(emptyInspection.status == .noMenu)
+        #expect(emptyInspection.menu == nil)
+        #expect(emptyInspection.submitBar == nil)
+    }
+
+    @Test("inspection encodes as stable JSON for CLI output")
+    func inspectorCodableJSON() throws {
+        let inspection = PilotTuiInspector.inspect(screen: single)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+
+        let data = try encoder.encode(inspection)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object["status"] as? String == "menu")
+        let menu = try #require(object["menu"] as? [String: Any])
+        #expect(menu["question"] as? String == "どの観点で深掘りしますか？")
+        #expect(menu["cursor_index"] as? Int == 1)
+        let options = try #require(menu["options"] as? [[String: Any]])
+        #expect(options.count == 3)
+        #expect(options[1]["label"] as? String == "コード品質の全体監査")
+    }
+
     @Test("planning skips unsafe targets and escapes low-confidence guesses")
     func planningSafety() throws {
         let menu = try #require(PilotTuiMenuParser.parseMenu(screen: multi))

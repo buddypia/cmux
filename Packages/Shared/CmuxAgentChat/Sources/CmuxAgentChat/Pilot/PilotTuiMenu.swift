@@ -59,7 +59,7 @@ public protocol PilotTuiSurfaceDriving: Sendable {
 }
 
 /// A numbered option rendered by a terminal selection menu.
-public struct PilotTuiOption: Sendable, Equatable {
+public struct PilotTuiOption: Sendable, Equatable, Codable {
     /// The 1-based number shown by the TUI.
     public let number: Int
 
@@ -86,7 +86,7 @@ public struct PilotTuiOption: Sendable, Equatable {
 }
 
 /// A parsed interactive TUI menu from a terminal screen snapshot.
-public struct PilotTuiMenu: Sendable, Equatable {
+public struct PilotTuiMenu: Sendable, Equatable, Codable {
     /// The nearest non-empty question line above the options.
     public let question: String
 
@@ -113,7 +113,7 @@ public struct PilotTuiMenu: Sendable, Equatable {
 }
 
 /// Progress information from a multi-select submit bar.
-public struct PilotTuiSubmitBar: Sendable, Equatable {
+public struct PilotTuiSubmitBar: Sendable, Equatable, Codable {
     /// The raw submit-bar line.
     public let line: String
 

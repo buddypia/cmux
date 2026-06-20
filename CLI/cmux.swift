@@ -2799,8 +2799,10 @@ struct CMUXCLI {
     static let pilotUsage = """
         Usage: cmux pilot select --option <n> [flags]
                cmux pilot select <n> [flags]
+               cmux pilot inspect [flags]
 
-        Drive a detected Pilot TUI menu on a terminal surface through the live cmux socket.
+        Inspect or drive a detected Pilot TUI menu on a terminal surface through
+        the live cmux socket.
 
         Flags:
           --option <n>                 Numbered menu option to select
@@ -2813,6 +2815,7 @@ struct CMUXCLI {
           --window <id|ref|index>      Window context for workspace/surface refs and indexes
 
         Examples:
+          cmux pilot inspect --json
           cmux pilot select --option 2
           cmux pilot select 1 --surface surface:2 --confidence 0.92 --json
         """
@@ -3085,6 +3088,13 @@ struct CMUXCLI {
         }
 
         switch subcommand {
+        case "inspect":
+            try runPilotInspectCommand(
+                arguments: Array(commandArgs.dropFirst()),
+                client: client,
+                jsonOutput: jsonOutput,
+                windowOverride: windowOverride
+            )
         case "select":
             try runPilotSelectCommand(
                 arguments: Array(commandArgs.dropFirst()),
@@ -3096,6 +3106,40 @@ struct CMUXCLI {
             print(Self.pilotUsage)
         default:
             throw CLIError(message: "Unknown pilot subcommand: \(subcommand)")
+        }
+    }
+
+    private func runPilotInspectCommand(
+        arguments: [String],
+        client: SocketClient,
+        jsonOutput: Bool,
+        windowOverride: String?
+    ) throws {
+        let (linesArg, rem0) = parseOption(arguments, name: "--lines")
+        let (_, rem1) = parseOption(rem0, name: "--workspace")
+        let (_, rem2) = parseOption(rem1, name: "--surface")
+        let (_, rem3) = parseOption(rem2, name: "--window")
+        guard rem3.isEmpty else {
+            throw CLIError(message: "pilot inspect: unexpected arguments: \(rem3.joined(separator: " "))")
+        }
+
+        let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
+        let driver = try makePilotSurfaceDriver(
+            arguments: arguments,
+            client: client,
+            windowOverride: windowOverride
+        )
+        let inspection = try runSynchronousPilotTask {
+            let screen = try await driver.readScreen(
+                options: PilotTuiSurfaceReadOptions(lines: readLines)
+            )
+            return PilotTuiInspector.inspect(screen: screen)
+        }
+
+        if jsonOutput {
+            print(try pilotJSON(inspection))
+        } else {
+            print(pilotInspectionSummary(inspection))
         }
     }
 
@@ -3131,23 +3175,11 @@ struct CMUXCLI {
         let requiredConfidence = try parsePilotConfidence(requiredConfidenceArg ?? "0.7", optionName: "--required-confidence")
         let readLines = try parsePilotPositiveInt(linesArg ?? "120", optionName: "--lines")
 
-        let windowRaw = windowOpt ?? windowOverride
-        let env = ProcessInfo.processInfo.environment
-        let workspaceArg = wsArg ?? (windowRaw == nil ? env["CMUX_WORKSPACE_ID"] : nil)
-        let surfaceArg = sfArg ?? (wsArg == nil && windowRaw == nil ? env["CMUX_SURFACE_ID"] : nil)
-
-        let winId = try normalizeWindowHandle(windowRaw, client: client)
-        let wsId = try normalizeWorkspaceHandle(workspaceArg, client: client, windowHandle: winId)
-        let sfId = try normalizeSurfaceHandle(surfaceArg, client: client, workspaceHandle: wsId, windowHandle: winId)
-        let target = PilotTuiSurfaceTarget(windowID: winId, workspaceID: wsId, surfaceID: sfId)
-        let transport = CLIPilotRPCTransport(client: client)
-        let driver = PilotTuiRPCSurfaceDriver(
-            target: target,
-            transport: { method, params in
-                try await transport.send(method: method, params: params)
-            }
+        let driver = try makePilotSurfaceDriver(
+            arguments: arguments,
+            client: client,
+            windowOverride: windowOverride
         )
-
         let result = try runSynchronousPilotTask {
             try await PilotTuiAutoSelector.run(
                 driver: driver,
@@ -3166,6 +3198,33 @@ struct CMUXCLI {
         } else {
             print(pilotSelectSummary(result))
         }
+    }
+
+    private func makePilotSurfaceDriver(
+        arguments: [String],
+        client: SocketClient,
+        windowOverride: String?
+    ) throws -> PilotTuiRPCSurfaceDriver {
+        let (wsArg, rem0) = parseOption(arguments, name: "--workspace")
+        let (sfArg, rem1) = parseOption(rem0, name: "--surface")
+        let (windowOpt, _) = parseOption(rem1, name: "--window")
+        let windowRaw = windowOpt ?? windowOverride
+        let env = ProcessInfo.processInfo.environment
+        let workspaceArg = wsArg ?? (windowRaw == nil ? env["CMUX_WORKSPACE_ID"] : nil)
+        let surfaceArg = sfArg ?? (wsArg == nil && windowRaw == nil ? env["CMUX_SURFACE_ID"] : nil)
+
+        let winId = try normalizeWindowHandle(windowRaw, client: client)
+        let wsId = try normalizeWorkspaceHandle(workspaceArg, client: client, windowHandle: winId)
+        let sfId = try normalizeSurfaceHandle(surfaceArg, client: client, workspaceHandle: wsId, windowHandle: winId)
+        let target = PilotTuiSurfaceTarget(windowID: winId, workspaceID: wsId, surfaceID: sfId)
+        let transport = CLIPilotRPCTransport(client: client)
+        let driver = PilotTuiRPCSurfaceDriver(
+            target: target,
+            transport: { method, params in
+                try await transport.send(method: method, params: params)
+            }
+        )
+        return driver
     }
 
     private func parsePilotConfidence(_ raw: String, optionName: String) throws -> Double {
@@ -3211,6 +3270,36 @@ struct CMUXCLI {
     private func pilotKeySummary(_ keys: [PilotTuiKey]) -> String {
         let values = keys.map(\.rawValue)
         return values.isEmpty ? "no keys" : values.joined(separator: ",")
+    }
+
+    private func pilotJSON<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let data = try encoder.encode(value)
+        guard let string = String(data: data, encoding: .utf8) else {
+            throw CLIError(message: "Failed to encode pilot JSON")
+        }
+        return string
+    }
+
+    private func pilotInspectionSummary(_ inspection: PilotTuiInspection) -> String {
+        switch inspection.status {
+        case .submitReady:
+            return "submit ready"
+        case .noMenu:
+            return "no Pilot TUI menu detected"
+        case .menu:
+            guard let menu = inspection.menu else {
+                return "menu detected"
+            }
+            var lines = ["menu: \(menu.question)"]
+            for (index, option) in menu.options.enumerated() {
+                let cursor = index == menu.cursorIndex ? ">" : " "
+                lines.append("\(cursor) \(option.number). \(option.label)")
+            }
+            return lines.joined(separator: "\n")
+        }
     }
 
     private func runBrowserAvailabilityCommand(
@@ -34375,7 +34464,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           diff [patch-file|-] [--source <unstaged|staged|branch|last-turn>] [--unstaged|--staged|--branch|--last-turn] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--cwd <path>] [--base <ref>] [--focus <true|false>] [--no-focus] [--title <text>] [--layout <split|unified>] [--font-size <points>]
           feedback [--email <email> --body <text> [--image <path> ...]]
           feed tui|clear
-          pilot select --option <n> [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
+          pilot inspect|select [--option <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           themes [list|set|clear]
           claude-teams [claude-args...]
           codex-teams [codex-args...]
@@ -34443,6 +34532,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           rename-window [--workspace <id|ref|index>] [--window <id|ref|index>] <title>
           current-workspace [--window <id|ref|index>]
           read-screen [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] [--scrollback] [--lines <n>]
+          pilot inspect [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           pilot select --option <n> [--confidence <0...1>] [--required-confidence <0...1>] [--lines <n>] [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>]
           send [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <text>
           send-key [--workspace <id|ref|index>] [--surface <id|ref|index>] [--window <id|ref|index>] <key>
