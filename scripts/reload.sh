@@ -4,6 +4,16 @@ set -euo pipefail
 APP_NAME="cmux DEV"
 BUNDLE_ID="com.cmuxterm.app.debug"
 BASE_APP_NAME="cmux DEV"
+RELOAD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELOAD_PROJECT_DIR="$(dirname "$RELOAD_SCRIPT_DIR")"
+if [[ -z "${CMUX_RELOAD_BASE_APP_NAME:-}" ]] \
+  && grep -q 'PRODUCT_NAME = "Buddypia cmux DEV";' "$RELOAD_PROJECT_DIR/cmux.xcodeproj/project.pbxproj" 2>/dev/null; then
+  BASE_APP_NAME="Buddypia cmux DEV"
+  APP_NAME="$BASE_APP_NAME"
+elif [[ -n "${CMUX_RELOAD_BASE_APP_NAME:-}" ]]; then
+  BASE_APP_NAME="$CMUX_RELOAD_BASE_APP_NAME"
+  APP_NAME="$BASE_APP_NAME"
+fi
 DERIVED_DATA=""
 NAME_SET=0
 BUNDLE_SET=0
@@ -75,7 +85,7 @@ if [[ -n "\$SOCKET_ARG" ]]; then
     TAG="\${SOCKET_NAME#cmux-debug-}"
     TAG="\${TAG%.sock}"
     if [[ "\$TAG" =~ ^[A-Za-z0-9_-]+$ ]]; then
-      TAG_CLI="\$HOME/Library/Developer/Xcode/DerivedData/cmux-\$TAG/Build/Products/Debug/cmux DEV \$TAG.app/Contents/Resources/bin/cmux"
+      TAG_CLI="\$HOME/Library/Developer/Xcode/DerivedData/cmux-\$TAG/Build/Products/Debug/${BASE_APP_NAME} \$TAG.app/Contents/Resources/bin/cmux"
       if [[ -x "\$TAG_CLI" ]] && [[ "\$TAG_CLI" != "\$0" ]]; then
         exec "\$TAG_CLI" "\$@"
       fi
@@ -425,14 +435,14 @@ print_tag_cleanup_reminder() {
     done
     echo "Cleanup stale tags only:"
     for tag in "${stale_tags[@]}"; do
-      echo "  pkill -f \"cmux DEV ${tag}.app/Contents/MacOS/cmux DEV\""
+      echo "  pkill -f \"${BASE_APP_NAME} ${tag}.app/Contents/MacOS/${BASE_APP_NAME}\""
       echo "  rm -rf \"$(tagged_derived_data_path "$tag")\" \"/tmp/cmux-${tag}\" \"/tmp/cmux-debug-${tag}.sock\""
       echo "  rm -f \"/tmp/cmux-debug-${tag}.log\""
       echo "  rm -f \"$HOME/Library/Application Support/cmux/cmuxd-dev-${tag}.sock\""
     done
   fi
   echo "After you verify current tag, cleanup command:"
-  echo "  pkill -f \"cmux DEV ${current_slug}.app/Contents/MacOS/cmux DEV\""
+  echo "  pkill -f \"${BASE_APP_NAME} ${current_slug}.app/Contents/MacOS/${BASE_APP_NAME}\""
   echo "  rm -rf \"$(tagged_derived_data_path "$current_slug")\" \"/tmp/cmux-${current_slug}\" \"/tmp/cmux-debug-${current_slug}.sock\""
   echo "  rm -f \"/tmp/cmux-debug-${current_slug}.log\""
   echo "  rm -f \"$HOME/Library/Application Support/cmux/cmuxd-dev-${current_slug}.sock\""
@@ -513,7 +523,7 @@ if [[ -n "$TAG" ]]; then
     exit 1
   fi
   if [[ "$NAME_SET" -eq 0 ]]; then
-    APP_NAME="cmux DEV ${TAG_SLUG}"
+    APP_NAME="${BASE_APP_NAME} ${TAG_SLUG}"
   fi
   if [[ "$BUNDLE_SET" -eq 0 ]]; then
     BUNDLE_ID="com.cmuxterm.app.debug.${TAG_ID}"
