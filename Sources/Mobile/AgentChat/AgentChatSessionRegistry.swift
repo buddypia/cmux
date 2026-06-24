@@ -18,6 +18,15 @@ final class AgentChatSessionRegistry {
     /// Per-session timestamp of the last hook-store file consult, bounding
     /// main-actor disk reads during tool storms.
     private var hookStoreConsultedAt: [String: Date] = [:]
+    private static let defaultHookStoreAgentSources = [
+        "claude",
+        "codex",
+        "antigravity",
+        "agy",
+        "gemini",
+        "gemini-cli",
+        "antigravity-cli",
+    ]
 
     /// Creates a registry.
     ///
@@ -99,11 +108,14 @@ final class AgentChatSessionRegistry {
     @discardableResult
     func refreshBindingsFromHookStore(sessionID: String) -> AgentChatSessionRecord? {
         guard let record = records[sessionID] else { return nil }
-        guard let entry = hookStore.entry(agentSource: record.agentKind.sourceName, sessionID: sessionID) else {
-            return record
+        for source in Self.hookStoreAgentSources(for: record.agentKind) {
+            guard let entry = hookStore.entry(agentSource: source, sessionID: sessionID) else {
+                continue
+            }
+            update(sessionID: sessionID) { $0.adoptBindings(from: entry, includingPID: false) }
+            return records[sessionID]
         }
-        update(sessionID: sessionID) { $0.adoptBindings(from: entry, includingPID: false) }
-        return records[sessionID]
+        return record
     }
 
     /// Applies a mutation to a record and notifies the change callback
@@ -139,13 +151,77 @@ final class AgentChatSessionRegistry {
         }
     }
 
+    /// A transcript row can expose an actionable permission/question for
+    /// agents whose hooks did not report it. Preserve an existing
+    /// needs-input start time, but still let the row refresh activity.
+    func noteTranscriptNeedsInput(sessionID: String, at timestamp: Date) {
+        update(sessionID: sessionID) { record in
+            guard record.state != .ended else { return }
+            if case .needsInput = record.state {
+                // Keep the original "since" so the wait duration remains
+                // stable while additional transcript rows arrive.
+            } else {
+                record.state = .needsInput(since: timestamp)
+            }
+            if timestamp > record.lastActivityAt {
+                record.lastActivityAt = timestamp
+            }
+        }
+    }
+
+    /// A transcript row can expose active tool work for hookless detected
+    /// sessions. Do not override a pending user decision; input waits are
+    /// more important than "working" for the session list and mobile toggle.
+    func noteTranscriptWorking(sessionID: String, at timestamp: Date) {
+        update(sessionID: sessionID) { record in
+            guard record.state != .ended else { return }
+            if case .needsInput = record.state {
+                // Preserve the active user-decision state while still
+                // reflecting that new transcript activity happened.
+            } else if case .working = record.state {
+                // Preserve the original "since" for a stable duration.
+            } else {
+                record.state = .working(since: timestamp)
+            }
+            if timestamp > record.lastActivityAt {
+                record.lastActivityAt = timestamp
+            }
+        }
+    }
+
+    /// A transcript update can complete the only observed in-flight tool for a
+    /// hookless session. Use that fact only to clear transcript-derived working;
+    /// actionable input and ended states remain authoritative.
+    func noteTranscriptWorkingResolved(sessionID: String, at timestamp: Date) {
+        update(sessionID: sessionID) { record in
+            guard case .working = record.state else { return }
+            record.state = .idle
+            if timestamp > record.lastActivityAt {
+                record.lastActivityAt = timestamp
+            }
+        }
+    }
+
+    /// Clears the current needs-input wait when the transcript republishes
+    /// an actionable card with an answer. Hook events can immediately move
+    /// the session back to working when more agent activity follows.
+    func noteTranscriptInputResolved(sessionID: String, at timestamp: Date) {
+        update(sessionID: sessionID) { record in
+            guard case .needsInput = record.state else { return }
+            record.state = .idle
+            if timestamp > record.lastActivityAt {
+                record.lastActivityAt = timestamp
+            }
+        }
+    }
+
     /// Seeds the registry from the on-disk hook stores so sessions started
     /// before app launch are listable immediately. Dead processes register
     /// as ended.
     ///
     /// - Parameter agentSources: The agent store files to read.
-    func seedFromHookStores(agentSources: [String] = ["claude", "codex"]) {
-        for source in agentSources {
+    func seedFromHookStores(agentSources: [String]? = nil) {
+        for source in agentSources ?? Self.defaultHookStoreAgentSources {
             let kind = ChatAgentKind(source: source)
             for entry in hookStore.entries(agentSource: source) {
                 guard records[entry.sessionID] == nil else { continue }
@@ -165,6 +241,19 @@ final class AgentChatSessionRegistry {
                 records[entry.sessionID] = record
                 updateLiveSessionIndex(previous: nil, current: record)
             }
+        }
+    }
+
+    private static func hookStoreAgentSources(for kind: ChatAgentKind) -> [String] {
+        switch kind {
+        case .claude:
+            return ["claude"]
+        case .codex:
+            return ["codex"]
+        case .antigravity:
+            return ["antigravity", "agy", "gemini", "gemini-cli", "antigravity-cli"]
+        case .other(let source):
+            return [source]
         }
     }
 
@@ -351,9 +440,19 @@ final class AgentChatSessionRegistry {
             // Compaction is lifecycle telemetry. It can occur while a session
             // is idle, so it must not create a synthetic working state.
             return previous
-        case .permissionRequest, .askUserQuestion, .exitPlanMode, .notification:
+        case .permissionRequest, .askUserQuestion, .exitPlanMode:
             if case .needsInput = previous { return previous }
             return .needsInput(since: event.receivedAt)
+        case .notification:
+            switch notificationLifecycleSignal(for: event) {
+            case .idle?:
+                return .idle
+            case .needsInput?:
+                if case .needsInput = previous { return previous }
+                return .needsInput(since: event.receivedAt)
+            case nil:
+                return previous
+            }
         case .stop:
             return .idle
         case .subagentStart, .subagentStop:
@@ -363,5 +462,113 @@ final class AgentChatSessionRegistry {
         case .sessionEnd:
             return .ended
         }
+    }
+
+    private enum NotificationLifecycleSignal {
+        case idle
+        case needsInput
+    }
+
+    private static func notificationLifecycleSignal(
+        for event: WorkstreamEvent
+    ) -> NotificationLifecycleSignal? {
+        let fields = notificationFields(for: event)
+        let reason = firstString(
+            in: fields,
+            keys: ["reason", "notification_type", "matcher", "status", "state", "kind", "type"]
+        )
+        let message = firstString(
+            in: fields,
+            keys: ["message", "body", "text", "prompt", "description", "summary", "error", "title", "subtitle"]
+        )
+        let signal = [reason, message]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !signal.isEmpty else { return nil }
+
+        if signal == "needsinput"
+            || signal == "needs_input"
+            || signal == "needs-input"
+            || signal == "waiting"
+            || signal == "idle_prompt"
+            || signal.contains("needs input")
+            || signal.contains("waiting for input")
+            || signal.contains("requires input")
+            || signal.contains("approval required")
+            || signal.contains("approval needed")
+            || signal.contains("requires approval")
+            || signal.contains("permission required")
+            || signal.contains("permission needed")
+            || signal.contains("approve") {
+            return .needsInput
+        }
+
+        if signal == "error"
+            || signal.contains(" error")
+            || signal.contains("error ")
+            || signal.contains("error:")
+            || signal.contains("failed")
+            || signal.contains("failure")
+            || signal.contains("exception") {
+            return .needsInput
+        }
+
+        let isNegatedCompletion = signal.contains("incomplete")
+            || signal.contains("undone")
+            || signal.contains("not complete")
+            || signal.contains("not completed")
+        if !isNegatedCompletion,
+           signal == "idle"
+            || signal == "completed"
+            || signal == "complete"
+            || signal == "done"
+            || signal.contains("turn complete")
+            || signal.contains("turn completed")
+            || signal.contains("task complete")
+            || signal.contains("task completed")
+            || signal.contains("completed")
+            || signal.contains("finished") {
+            return .idle
+        }
+
+        return nil
+    }
+
+    private static func notificationFields(for event: WorkstreamEvent) -> [String: Any] {
+        var fields: [String: Any] = [:]
+        mergeJSONFields(event.toolInputJSON, into: &fields)
+        mergeJSONFields(event.extraFieldsJSON, into: &fields)
+        for key in ["notification", "data", "extra"] {
+            guard let nested = fields[key] as? [String: Any] else { continue }
+            fields.merge(nested) { current, _ in current }
+        }
+        return fields
+    }
+
+    private static func mergeJSONFields(_ json: String?, into fields: inout [String: Any]) {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(
+                  with: data,
+                  options: [.fragmentsAllowed]
+              ) as? [String: Any] else {
+            return
+        }
+        fields.merge(object) { _, new in new }
+    }
+
+    private static func firstString(in fields: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            guard let value = fields[key] else { continue }
+            if let string = value as? String {
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            } else if let number = value as? NSNumber {
+                return number.stringValue
+            }
+        }
+        return nil
     }
 }

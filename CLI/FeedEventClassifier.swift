@@ -98,9 +98,10 @@ struct FeedEventClassifier {
     /// than the generic `PermissionRequest`. Returns the actionable wire
     /// mapping for such a tool, or `nil` for ordinary tools.
     private static func dedicatedApprovalEvent(for toolName: String) -> (String, Bool)? {
-        switch toolName {
-        case "ExitPlanMode": return ("ExitPlanMode", true)
-        case "AskUserQuestion": return ("AskUserQuestion", true)
+        switch toolName.lowercased() {
+        case "exitplanmode": return ("ExitPlanMode", true)
+        case "askuserquestion", "ask_user_question", "request_user_input":
+            return ("AskUserQuestion", true)
         default: return nil
         }
     }
@@ -294,6 +295,14 @@ struct FeedEventClassifier {
         "generate_image",
     ]
 
+    /// Antigravity/Gemini transcripts can name shell execution differently
+    /// across versions. Keep these aliases source-scoped so generic agents do
+    /// not inherit broad lowercase shell approvals.
+    private static let antigravitySideEffectingToolAliases: Set<String> = [
+        "execute_bash",
+        "run_shell_command",
+    ]
+
     /// Kiro emits lowercase / internal tool names (`fs_write`,
     /// `execute_bash`, `use_aws`, …) absent from ``sideEffectingTools``.
     /// Matched case-insensitively, but only for the `kiro` source, so another
@@ -325,14 +334,17 @@ struct FeedEventClassifier {
     ]
 
     /// Whether a tool mutates state and deserves an approval prompt. Exact
-    /// match against ``sideEffectingTools`` for every source; the `kiro`
-    /// source additionally matches its case-insensitive internal aliases.
-    /// Kept source-scoped so another agent's lowercase tool name is not
-    /// escalated into an approval.
+    /// match against ``sideEffectingTools`` for every source; Antigravity and
+    /// Kiro additionally match their case-insensitive internal aliases. Kept
+    /// source-scoped so another agent's lowercase tool name is not escalated
+    /// into an approval.
     static func isSideEffectingTool(_ toolName: String, source: String) -> Bool {
         guard !toolName.isEmpty else { return false }
         if sideEffectingTools.contains(toolName) {
             return true
+        }
+        if source == "antigravity" {
+            return antigravitySideEffectingToolAliases.contains(toolName.lowercased())
         }
         if source == "kiro" {
             return kiroSideEffectingToolAliases.contains(toolName.lowercased())

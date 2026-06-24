@@ -20,7 +20,7 @@ struct AgentChatSessionRecord: Sendable {
     /// The session's working directory, when known.
     var workingDirectory: String?
 
-    /// Absolute transcript JSONL path, when resolved.
+    /// Absolute transcript path, when resolved.
     var transcriptPath: String?
 
     /// Live activity state derived from hook events.

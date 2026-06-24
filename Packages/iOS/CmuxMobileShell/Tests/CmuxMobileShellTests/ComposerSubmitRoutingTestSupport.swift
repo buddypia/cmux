@@ -40,9 +40,16 @@ actor RoutingHostRouter {
         var surfaceID: String
         var text: String
     }
+    struct ChatAnswerRecord: Sendable, Equatable {
+        var sessionID: String
+        var action: String?
+        var optionIndex: Int?
+    }
+
     private(set) var pasteImages: [PasteImageRecord] = []
     private(set) var pastes: [PasteRecord] = []
     private(set) var dismisses: [(notificationIDs: [String], clientID: String?)] = []
+    private(set) var chatAnswers: [ChatAnswerRecord] = []
     /// Reject the Nth (0-based) and later paste_image requests; `nil` accepts all.
     private var rejectPasteImageFromIndex: Int?
     private var holdFirstPasteImage = false
@@ -90,6 +97,7 @@ actor RoutingHostRouter {
     func recordedPasteImages() -> [PasteImageRecord] { pasteImages }
     func recordedPastes() -> [PasteRecord] { pastes }
     func recordedDismisses() -> [(notificationIDs: [String], clientID: String?)] { dismisses }
+    func recordedChatAnswers() -> [ChatAnswerRecord] { chatAnswers }
 
     /// Sendable extract of the request fields the router needs, pulled off the
     /// non-Sendable params dictionary before crossing the Task boundary.
@@ -101,6 +109,9 @@ actor RoutingHostRouter {
         var text: String?
         var notificationIDs: [String]?
         var clientID: String?
+        var sessionID: String?
+        var action: String?
+        var optionIndex: Int?
     }
 
     func response(_ info: RequestInfo) async -> Data? {
@@ -172,6 +183,13 @@ actor RoutingHostRouter {
                 clientID: info.clientID
             ))
             return try? Self.resultFrame(id: id, result: [:])
+        case "mobile.chat.answer":
+            chatAnswers.append(ChatAnswerRecord(
+                sessionID: info.sessionID ?? "",
+                action: info.action,
+                optionIndex: info.optionIndex
+            ))
+            return try? Self.resultFrame(id: id, result: [:])
         case "mobile.events.unsubscribe", "mobile.terminal.replay", "mobile.terminal.viewport":
             return try? Self.resultFrame(id: id, result: [:])
         default:
@@ -236,6 +254,14 @@ private actor RoutingTransport: CmxByteTransport {
         for payload in payloads {
             let parsed = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
             let params = parsed?["params"] as? [String: Any]
+            let optionIndex: Int?
+            if let rawOptionIndex = params?["option_index"] as? Int {
+                optionIndex = rawOptionIndex
+            } else if let rawOptionIndex = params?["option_index"] as? NSNumber {
+                optionIndex = rawOptionIndex.intValue
+            } else {
+                optionIndex = nil
+            }
             // Extract only the Sendable fields the router needs BEFORE the Task,
             // so the non-Sendable params dictionary never crosses the boundary.
             let info = RoutingHostRouter.RequestInfo(
@@ -245,7 +271,10 @@ private actor RoutingTransport: CmxByteTransport {
                 imageFormat: params?["image_format"] as? String,
                 text: params?["text"] as? String,
                 notificationIDs: params?["notification_ids"] as? [String],
-                clientID: params?["client_id"] as? String
+                clientID: params?["client_id"] as? String,
+                sessionID: params?["session_id"] as? String,
+                action: params?["action"] as? String,
+                optionIndex: optionIndex
             )
             Task { [router, weak self] in
                 guard let response = await router.response(info) else {

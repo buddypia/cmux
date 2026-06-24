@@ -21,6 +21,20 @@
   <img src="./docs/assets/main-first-image.png" alt="cmux screenshot" width="900" />
 </p>
 
+## Buddypia Agent Studio fork 運用メモ
+
+この checkout は Agent Studio と連携するための buddypia 個人運用 fork です。公式 cmux の一般配布物ではありません。通常利用・upstream 追従・rollback 調査のために upstream 情報は残しますが、本運用で Agent Studio と組み合わせる cmux はこの fork の固定 SHA を使います。
+
+- fork remote: `git@github-buddypia:buddypia/cmux.git`
+- upstream remote: `https://github.com/manaflow-ai/cmux`
+- 運用 branch: `feature/buddypia-agent-studio-cmux`
+- Agent Studio 側 submodule path: `third_party/cmux`
+- 現在 Agent Studio が固定している SHA: Agent Studio repo の `docs/oss/cmux/fork-pin.md` を正とする
+
+Agent Studio 側の手順と pin 記録は、Agent Studio repo の `docs/oss/cmux/fork-production-runbook.md` と `docs/oss/cmux/fork-pin.md` を正とします。cmux を変更したら、この repo で commit / push してから、Agent Studio 側で `third_party/cmux` の gitlink を更新してください。Agent Studio 直下に `cmux/` を通常フォルダとして commit しないでください。
+
+この fork の目的は、自分の Agent Studio 本運用で安定して使える cmux アプリを維持することです。公開 Homebrew cask / 公式 DMG / upstream docs の利用者向け説明とは分けて考えます。
+
 <p align="center">
   <a href="https://www.youtube.com/watch?v=i-WxO5YUTOs">▶ Demo video</a> · <a href="https://cmux.com/blog/zen-of-cmux">The Zen of cmux</a>
 </p>
@@ -269,9 +283,10 @@ cmux hooks setup --agent opencode
 
 `cmux hooks setup` installs supported agents it can find and prints a summary
 for skipped agents. Supported resume integrations include Claude Code, Codex,
-Grok, OpenCode, Pi, Amp, Cursor CLI, Gemini, Rovo Dev, Copilot, CodeBuddy,
-Factory, and Qoder. Claude Code is handled by the cmux Claude wrapper when Claude
-integration is enabled in Settings.
+Grok, OpenCode, Pi, OMP, Amp, Cursor CLI, Gemini, Kiro CLI, Antigravity,
+Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder. Claude Code is
+handled by the cmux Claude wrapper when Claude integration is enabled in
+Settings.
 
 Advanced users and integrations can attach a custom resume command to the
 current terminal surface. This is useful for tools with their own durable state,

@@ -218,7 +218,8 @@ final class CmuxConfigDecodingTests: XCTestCase {
         {
           "actions": {
             "start-codex": { "type": "agent", "agent": "codex" },
-            "start-claude": { "type": "agent", "agent": "claude", "args": "--permission-mode acceptEdits" }
+            "start-claude": { "type": "agent", "agent": "claude", "args": "--permission-mode acceptEdits" },
+            "start-antigravity": { "type": "agent", "agent": "antigravity", "args": "--dangerously-skip-permissions" }
           },
           "ui": {
             "surfaceTabBar": {
@@ -232,6 +233,10 @@ final class CmuxConfigDecodingTests: XCTestCase {
                   "action": "start-claude",
                   "icon": { "type": "emoji", "value": "🤖" },
                   "tooltip": "Start Claude Code"
+                },
+                {
+                  "action": "start-antigravity",
+                  "tooltip": "Start Antigravity"
                 }
               ]
             }
@@ -243,13 +248,39 @@ final class CmuxConfigDecodingTests: XCTestCase {
         let buttons = try rawButtons.map {
             try $0.resolved(actions: resolvedActions(from: config), codingPath: [])
         }
-        XCTAssertEqual(buttons.count, 2)
+        XCTAssertEqual(buttons.count, 3)
         XCTAssertEqual(buttons[0].id, "start-codex")
         XCTAssertEqual(buttons[0].icon, .imagePath("./icons/codex.png"))
         XCTAssertEqual(buttons[0].terminalCommand, "codex")
         XCTAssertEqual(buttons[1].id, "start-claude")
         XCTAssertEqual(buttons[1].icon, .emoji("🤖"))
         XCTAssertEqual(buttons[1].terminalCommand, "claude --permission-mode acceptEdits")
+        XCTAssertEqual(buttons[2].id, "start-antigravity")
+        XCTAssertEqual(buttons[2].title, "Antigravity")
+        XCTAssertEqual(buttons[2].terminalCommand, "agy --dangerously-skip-permissions")
+    }
+
+    func testDecodeAgentActionAcceptsAntigravityAlias() throws {
+        let json = """
+        {
+          "actions": {
+            "start-agy": { "type": "agent", "agent": "agy" }
+          },
+          "ui": {
+            "surfaceTabBar": {
+              "buttons": [
+                { "action": "start-agy" }
+              ]
+            }
+          }
+        }
+        """
+        let config = try decode(json)
+        let rawButton = try XCTUnwrap(config.surfaceTabBarButtons?.first)
+        let button = try rawButton.resolved(actions: resolvedActions(from: config), codingPath: [])
+        XCTAssertEqual(button.title, "Antigravity")
+        XCTAssertEqual(button.icon, .symbol("paperplane"))
+        XCTAssertEqual(button.terminalCommand, "agy")
     }
 
     func testDecodeSurfaceTabBarButtonsDefersUnknownActionReferences() throws {
