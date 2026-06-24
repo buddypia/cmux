@@ -24,6 +24,17 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DEBUG_APP_BASE_NAME="${CMUX_RELOAD_BASE_APP_NAME:-}"
+if [[ -z "$DEBUG_APP_BASE_NAME" ]]; then
+  if grep -q 'PRODUCT_NAME = "Buddypia cmux DEV";' "$PROJECT_DIR/cmux.xcodeproj/project.pbxproj" 2>/dev/null; then
+    DEBUG_APP_BASE_NAME="Buddypia cmux DEV"
+  else
+    DEBUG_APP_BASE_NAME="cmux DEV"
+  fi
+fi
+
 sanitize_bundle() {
   local raw="$1"
   local cleaned
@@ -59,7 +70,7 @@ EOF
   exit 1
 fi
 
-cli_path="${HOME}/Library/Developer/Xcode/DerivedData/cmux-${tag_slug}/Build/Products/Debug/cmux DEV ${tag_slug}.app/Contents/Resources/bin/cmux"
+cli_path="${HOME}/Library/Developer/Xcode/DerivedData/cmux-${tag_slug}/Build/Products/Debug/${DEBUG_APP_BASE_NAME} ${tag_slug}.app/Contents/Resources/bin/cmux"
 if [[ ! -x "$cli_path" ]]; then
   cat >&2 <<EOF
 Tagged cmux CLI not found:

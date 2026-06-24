@@ -21,7 +21,7 @@ cleanup() {
 trap cleanup EXIT
 
 FAKE_HOME="$TMP_DIR/home"
-FAKE_CLI_DIR="$FAKE_HOME/Library/Developer/Xcode/DerivedData/cmux-${TAG_SLUG}/Build/Products/Debug/cmux DEV ${TAG_SLUG}.app/Contents/Resources/bin"
+FAKE_CLI_DIR="$FAKE_HOME/Library/Developer/Xcode/DerivedData/cmux-${TAG_SLUG}/Build/Products/Debug/Buddypia cmux DEV ${TAG_SLUG}.app/Contents/Resources/bin"
 FAKE_CLI="$FAKE_CLI_DIR/cmux"
 mkdir -p "$FAKE_CLI_DIR"
 cat > "$FAKE_CLI" <<'EOF'
