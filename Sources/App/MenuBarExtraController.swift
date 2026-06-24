@@ -478,8 +478,10 @@ enum MenuBarBuildHintFormatter {
     ) -> String? {
         guard isDebugBuild else { return nil }
         let normalized = appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prefix = "cmux DEV"
-        guard normalized.hasPrefix(prefix) else { return "Build: DEV" }
+        let prefixes = ["Buddypia cmux DEV", "cmux DEV"]
+        guard let prefix = prefixes.first(where: { normalized.hasPrefix($0) }) else {
+            return "Build: DEV"
+        }
 
         let suffix = String(normalized.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
         if suffix.isEmpty {
