@@ -36,6 +36,8 @@ public struct ChatQuestionCardView: View {
                     .foregroundStyle(.primary)
                 if let selected = question.selectedOptionLabel {
                     receipt(selected: selected)
+                } else if let resolution = question.resolution {
+                    receipt(resolution: resolution)
                 } else {
                     optionButtons
                 }
@@ -109,5 +111,31 @@ public struct ChatQuestionCardView: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    private func receipt(resolution: ChatQuestion.Resolution) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: receiptSymbolName(resolution: resolution))
+                .font(.caption2.weight(.semibold))
+                .accessibilityHidden(true)
+            Text(receiptLabel(resolution: resolution))
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func receiptSymbolName(resolution: ChatQuestion.Resolution) -> String {
+        switch resolution {
+        case .expired: return "clock"
+        }
+    }
+
+    private func receiptLabel(resolution: ChatQuestion.Resolution) -> String {
+        switch resolution {
+        case .expired:
+            return String(
+                localized: "chat.question.expired", defaultValue: "Expired", bundle: .module
+            )
+        }
     }
 }

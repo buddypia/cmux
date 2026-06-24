@@ -155,6 +155,10 @@ import Testing
 
     private func jsonlLine(role: String, content: Any) -> String {
         let object: [String: Any] = ["type": role, "message": ["content": content]]
+        return jsonObjectLine(object)
+    }
+
+    private func jsonObjectLine(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object)
         return String(data: data, encoding: .utf8)!
     }
@@ -179,6 +183,43 @@ import Testing
     @Test func emptyOrUnreadableTranscriptYieldsNoContext() {
         #expect(engine.buildContext(from: []) == nil)
         #expect(engine.extractMessages(fromTranscriptLines: ["", "garbage", "{}"]).isEmpty)
+    }
+
+    @Test func extractsAntigravityBrainLogConversationRows() {
+        let lines = [
+            jsonObjectLine([
+                "type": "USER_INPUT",
+                "content": "Name workspaces from Antigravity brain logs",
+                "created_at": "2026-06-19T11:00:00Z"
+            ]),
+            jsonObjectLine([
+                "type": "PLANNER_RESPONSE",
+                "content": "I will inspect the generated transcript.",
+                "thinking": "Do not include hidden planning in the title prompt.",
+                "tool_calls": [
+                    [
+                        "name": "RUN_COMMAND",
+                        "args": ["command": "swift test"]
+                    ]
+                ],
+                "created_at": "2026-06-19T11:00:02Z"
+            ]),
+            jsonObjectLine([
+                "type": "RUN_COMMAND",
+                "content": "swift test passed",
+                "created_at": "2026-06-19T11:00:05Z"
+            ])
+        ]
+
+        let messages = engine.extractAntigravityMessages(fromTranscriptLines: lines)
+
+        #expect(messages == [
+            AutoNamingTranscriptMessage(role: "user", text: "Name workspaces from Antigravity brain logs"),
+            AutoNamingTranscriptMessage(role: "assistant", text: "I will inspect the generated transcript.")
+        ])
+        let context = engine.buildContext(from: messages)
+        #expect(context?.contains("hidden planning") == false)
+        #expect(context?.contains("swift test passed") == false)
     }
 
     @Test func contextCombinesHeadUserMessagesAndTailWithTruncation() throws {

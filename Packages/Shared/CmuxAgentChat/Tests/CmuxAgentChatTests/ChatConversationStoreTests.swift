@@ -54,6 +54,8 @@ private actor FailingChatEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
+
+    func submit(sessionID: String) async throws {}
 }
 
 /// A `ChatEventSource` whose `send` suspends until released, so tests can
@@ -84,6 +86,8 @@ private actor GatedChatEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
+
+    func submit(sessionID: String) async throws {}
 }
 
 /// A `ChatEventSource` whose `send` succeeds without echoing, with a
@@ -117,6 +121,35 @@ private actor SilentSendEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
+
+    func submit(sessionID: String) async throws {}
+}
+
+/// A `ChatEventSource` that records current-form submit actions.
+private actor RecordingSubmitEventSource: ChatEventSource {
+    private var submittedSessions: [String] = []
+
+    func history(sessionID: String, beforeSeq: Int?, limit: Int) async throws -> ChatHistoryPage {
+        ChatHistoryPage(messages: [], hasMore: false)
+    }
+
+    func events(sessionID: String) async -> AsyncStream<ChatSessionEvent> {
+        AsyncStream { $0.finish() }
+    }
+
+    func send(text: String, attachments: [ChatOutboundAttachment], sessionID: String) async throws {}
+
+    func interrupt(sessionID: String, hard: Bool) async throws {}
+
+    func answer(optionIndex: Int, sessionID: String) async throws {}
+
+    func submit(sessionID: String) async throws {
+        submittedSessions.append(sessionID)
+    }
+
+    func submissions() -> [String] {
+        submittedSessions
+    }
 }
 
 /// A `ChatEventSource` modeling the Mac tailer's bounded cache: the
@@ -146,6 +179,8 @@ private actor TruncatedHeadEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
+
+    func submit(sessionID: String) async throws {}
 }
 
 @Suite("ChatConversationStore")
@@ -381,6 +416,17 @@ struct ChatConversationStoreTests {
 
         await store.retry(pendingID: item.id)
         #expect(Self.pendingItems(store.rows).first?.delivery == .delivered)
+        #expect(store.lastErrorDescription == nil)
+    }
+
+    @Test("submitCurrentForm routes to the event source")
+    func submitCurrentFormRoutesToSource() async {
+        let source = RecordingSubmitEventSource()
+        let store = Self.makeStore(source: source)
+
+        await store.submitCurrentForm()
+
+        #expect(await source.submissions() == ["session-1"])
         #expect(store.lastErrorDescription == nil)
     }
 

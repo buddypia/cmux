@@ -110,6 +110,9 @@ public struct ChatScreen: View {
                     onInterrupt: { hard in
                         Task { await store.interrupt(hard: hard) }
                     },
+                    onSubmitForm: {
+                        Task { await store.submitCurrentForm() }
+                    },
                     onOpenTerminal: onOpenTerminal
                 )
                 #if os(iOS)

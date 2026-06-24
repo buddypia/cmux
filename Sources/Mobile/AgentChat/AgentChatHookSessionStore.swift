@@ -19,7 +19,7 @@ struct AgentChatHookSessionStore: Sendable {
         let surfaceID: String?
         /// The session's working directory.
         let workingDirectory: String?
-        /// Absolute transcript JSONL path, when the hook recorded one.
+        /// Absolute transcript path, when the hook recorded one.
         let transcriptPath: String?
         /// The agent process id, for liveness checks.
         let pid: Int?

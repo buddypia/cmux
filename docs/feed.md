@@ -80,6 +80,9 @@ Installs supported agent hooks whose binaries are on `PATH`. See [Agent hook int
 | OpenCode     | `~/.config/opencode/plugins/cmux-feed.js` | plugin event bus         |
 | Cursor CLI   | `~/.cursor/hooks.json`                    | beforeShellExecution     |
 | Gemini       | `~/.gemini/settings.json`                 | PreToolUse               |
+| Kiro CLI     | `~/.kiro/agents/cmux.json` or `$KIRO_HOME/agents/cmux.json` | preToolUse / postToolUse |
+| Antigravity  | `~/.gemini/config/hooks.json`             | PreToolUse / PostToolUse |
+| Hermes Agent | `~/.hermes/config.yaml` or `$HERMES_HOME/config.yaml` | pre_tool_call / post_tool_call / pre_approval_request |
 | Copilot      | `~/.copilot/config.json`                  | PreToolUse               |
 | CodeBuddy    | `~/.codebuddy/settings.json`              | PreToolUse               |
 | Factory      | `~/.factory/settings.json`                | PreToolUse               |
@@ -115,13 +118,15 @@ Pi, OMP, and Rovo Dev provide lifecycle and session-restore hooks only; they do 
 
 For Claude Code, the cmux wrapper launches Claude with `--allow-dangerously-skip-permissions`. This does not enable bypass by default, but it lets a later `PermissionRequest` response switch the current session into `bypassPermissions`. Without that launch flag, Claude ignores `setMode: bypassPermissions`.
 
+Antigravity and Kiro native hook replies currently accept only allow or deny, so cmux shows once/deny actions for their Feed cards and hides persistent or bypass controls until native support is verified.
+
 **Plan-mode decisions**
 
 | Mode              | Behavior                                                  |
 |-------------------|-----------------------------------------------------------|
-| Ultraplan | Reject the local plan and ask Claude to refine it with Ultraplan. |
+| Ultraplan | Reject the local plan and ask the agent to refine it with Ultraplan. |
 | Manual    | Allow the plan and keep manual edit approvals.                    |
-| Auto      | Allow the plan and request Claude auto mode.                      |
+| Auto      | Allow the plan and request the agent's auto mode when supported.  |
 | Deny      | Deny with the user's rejection or feedback message.               |
 
 **AskUserQuestion**
@@ -129,6 +134,8 @@ For Claude Code, the cmux wrapper launches Claude with `--allow-dangerously-skip
 For Claude Code, AskUserQuestion is answered by allowing the PermissionRequest with an updated tool input containing the selected answers. Other agents use their native question reply shape where available.
 
 Codex's hook-level `request_user_input`, `update_plan`, and approval prompts stay in Codex's own TUI/app-server path. cmux records Codex `PreToolUse` and `PermissionRequest` hooks as non-blocking telemetry only, because Codex runs `PermissionRequest` hooks before its `Approve for me` auto-review path. Blocking in hook mode would make Codex ask for Feed approval before its own reviewer can decide.
+
+Mobile Chat is a separate terminal-control path, not a Feed hook path. When a Claude, Codex, or Antigravity TUI menu is visibly focused in the terminal, Mobile Chat can answer the selected chat question by navigating that visible menu with arrow/enter keys. This does not turn Codex `request_user_input` into a Feed item, and it does not make Codex Feed hooks blocking.
 
 When Codex is launched through `cmux codex-teams`, cmux owns the private Codex app-server connection. The Codex Teams watcher listens for app-server command and file-change approval requests, which happen after Codex has decided that user approval is needed, and bridges those requests to Feed as actionable permission cards. A Feed click responds to the app-server request. If Feed times out or no decision is returned, cmux does not send a denial so Codex's native TUI approval can still answer the request.
 
@@ -162,7 +169,7 @@ Double-click a Feed row and cmux focuses the cmux workspace + surface where the 
 
 **Feed shows nothing even though the agent is running.** Check that the hook got installed: `cat ~/.codex/hooks.json` (or similar) should contain a `cmux hooks feed --source codex` entry. Re-run `cmux hooks setup`.
 
-**Codex plan-mode question stays in the terminal.** Codex `request_user_input` is not a hook event in the stock TUI path. Feed only sees Codex permission hooks today.
+**Codex plan-mode question stays in the terminal.** This is expected for Feed: Codex `request_user_input` is not a hook event in the stock TUI path, and Codex Feed hooks remain telemetry. Answer it in the Codex TUI, or use Mobile Chat while the visible terminal menu is focused.
 
 **Agent hangs on a permission request.** Feed never blocks the agent longer than 120 seconds; if you see a longer hang, the hook failed to reach the socket. Verify `$CMUX_SOCKET_PATH` matches the running app (default is `~/.config/cmux/cmux.sock`).
 

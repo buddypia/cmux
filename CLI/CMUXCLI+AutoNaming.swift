@@ -311,6 +311,29 @@ struct AutoNamingEngine: Sendable {
         return messages
     }
 
+    // MARK: - Transcript extraction (Antigravity JSON/JSONL)
+
+    /// Extracts user/assistant text messages from Antigravity transcript files.
+    /// Current builds may write role/parts JSONL, type/content JSONL, or a
+    /// single JSON object containing a `messages` array. Tool and lifecycle
+    /// events are ignored; this adapter only prepares source text and never
+    /// drives `agy` as a summarizer.
+    func extractAntigravityMessages(fromTranscriptLines lines: [String]) -> [AutoNamingTranscriptMessage] {
+        var messages: [AutoNamingTranscriptMessage] = []
+        for line in lines {
+            guard let object = jsonObject(from: line) else { continue }
+            appendAntigravityMessages(from: object, to: &messages)
+        }
+        if !messages.isEmpty {
+            return messages
+        }
+
+        let fullText = lines.joined(separator: "\n")
+        guard let object = jsonObject(from: fullText) else { return [] }
+        appendAntigravityMessages(from: object, to: &messages)
+        return messages
+    }
+
     // MARK: - Transcript extraction (generic hook payload cache)
 
     /// Extracts conversation messages from generic hook payloads that carry
@@ -414,6 +437,44 @@ struct AutoNamingEngine: Sendable {
             return
         }
         messages.append(AutoNamingTranscriptMessage(role: role, text: text))
+    }
+
+    private func appendAntigravityMessages(
+        from object: [String: Any],
+        to messages: inout [AutoNamingTranscriptMessage]
+    ) {
+        if let rows = object["messages"] as? [[String: Any]] {
+            for row in rows {
+                appendAntigravityMessages(from: row, to: &messages)
+            }
+            return
+        }
+        guard let message = antigravityMessage(from: object) else { return }
+        if messages.last == message { return }
+        messages.append(message)
+    }
+
+    private func antigravityMessage(from object: [String: Any]) -> AutoNamingTranscriptMessage? {
+        guard let rawRole = firstString(in: object, keys: ["role", "type"])?.lowercased() else {
+            return nil
+        }
+        let role: String
+        switch rawRole {
+        case "user", "user_input":
+            role = "user"
+        case "model", "gemini", "assistant", "planner_response":
+            role = "assistant"
+        default:
+            return nil
+        }
+
+        let rawText = firstText(in: object, keys: ["content", "text", "message", "parts"])
+        let text = role == "user" ? grokUserText(rawText) : rawText
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return AutoNamingTranscriptMessage(role: role, text: trimmed)
     }
 
     private func hookUserText(in object: [String: Any]) -> String? {
@@ -520,5 +581,14 @@ struct AutoNamingEngine: Sendable {
             return nil
         }
         return firstString(in: block, keys: ["text", "input_text", "content"])
+    }
+
+    private func jsonObject(from text: String) -> [String: Any]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8) else {
+            return nil
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 }

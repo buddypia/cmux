@@ -16,6 +16,7 @@ public struct ChatComposerView: View {
     private let isConnected: Bool
     private let onSend: (String, [ChatOutboundAttachment]) -> Void
     private let onInterrupt: (Bool) -> Void
+    private let onSubmitForm: () -> Void
     private let onOpenTerminal: () -> Void
 
     @Binding private var draft: String
@@ -49,6 +50,7 @@ public struct ChatComposerView: View {
     ///   - onSend: Sends the draft and staged attachments.
     ///   - onInterrupt: Interrupts the agent (`false` = Esc, `true` =
     ///     Ctrl-C).
+    ///   - onSubmitForm: Submits a completed in-terminal multi-step form.
     ///   - onOpenTerminal: Opens the session's raw terminal.
     public init(
         agentState: ChatAgentState,
@@ -58,6 +60,7 @@ public struct ChatComposerView: View {
         draft: Binding<String>,
         onSend: @escaping (String, [ChatOutboundAttachment]) -> Void,
         onInterrupt: @escaping (Bool) -> Void,
+        onSubmitForm: @escaping () -> Void = {},
         onOpenTerminal: @escaping () -> Void
     ) {
         self.agentState = agentState
@@ -67,6 +70,7 @@ public struct ChatComposerView: View {
         _draft = draft
         self.onSend = onSend
         self.onInterrupt = onInterrupt
+        self.onSubmitForm = onSubmitForm
         self.onOpenTerminal = onOpenTerminal
     }
 
@@ -78,6 +82,7 @@ public struct ChatComposerView: View {
                 ChatAccessoryChipRow(
                     agentState: agentState,
                     onInterrupt: onInterrupt,
+                    onSubmitForm: onSubmitForm,
                     onOpenTerminal: onOpenTerminal
                 )
                 #if os(iOS)
