@@ -115,6 +115,16 @@ struct FeedCoordinatorTests {
         #expect(CodexTeamsApprovalBridge.feedSourceSupportsPersistentPermissionModes("opencode"))
         #expect(CodexTeamsApprovalBridge.feedSourceSupportsBypassPermissions("opencode"))
 
+        #expect(!FeedPermissionActionPolicy.supportsPersistentPermissionModes(source: .antigravity))
+        #expect(!FeedPermissionActionPolicy.supportsBypassPermissions(source: .antigravity))
+        #expect(!CodexTeamsApprovalBridge.feedSourceSupportsPersistentPermissionModes("antigravity"))
+        #expect(!CodexTeamsApprovalBridge.feedSourceSupportsBypassPermissions("antigravity"))
+
+        #expect(!FeedPermissionActionPolicy.supportsPersistentPermissionModes(source: .kiro))
+        #expect(!FeedPermissionActionPolicy.supportsBypassPermissions(source: .kiro))
+        #expect(!CodexTeamsApprovalBridge.feedSourceSupportsPersistentPermissionModes("kiro"))
+        #expect(!CodexTeamsApprovalBridge.feedSourceSupportsBypassPermissions("kiro"))
+
         #expect(!FeedPermissionActionPolicy.supportsPersistentPermissionModes(source: .hermesAgent))
         #expect(!FeedPermissionActionPolicy.supportsBypassPermissions(source: .hermesAgent))
         #expect(!CodexTeamsApprovalBridge.feedSourceSupportsPersistentPermissionModes("hermes-agent"))

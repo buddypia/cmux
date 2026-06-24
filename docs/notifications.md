@@ -1,6 +1,6 @@
 # Notifications
 
-cmux provides a notification panel for AI agents like Claude Code, Codex, and OpenCode. Notifications appear in a dedicated panel and trigger macOS system notifications.
+cmux provides a notification panel for AI agents like Claude Code, Codex, Antigravity, and OpenCode. Notifications appear in a dedicated panel and trigger macOS system notifications.
 
 > For inline permission / plan / question approvals directly from the sidebar (Vibe Island-style), see **[Feed](feed.md)**. `cmux hooks setup` installs the Feed bridge alongside the notification hooks covered below.
 
@@ -111,13 +111,28 @@ Global hooks from `~/.config/cmux/cmux.json` run first. Project hooks from paren
 
 ## Integration Examples
 
+### Built-in agent hooks
+
+For supported agent CLIs, prefer the cmux hook installer. It installs lifecycle notifications, Feed bridge hooks where the agent supports them, and session-restore metadata in one pass.
+
+```bash
+cmux hooks setup
+cmux hooks setup codex
+cmux hooks setup antigravity
+cmux hooks setup agy
+```
+
+Codex hooks are written to `~/.codex/hooks.json` and `~/.codex/config.toml`. Antigravity hooks are written to `~/.gemini/config/hooks.json`.
+
 ### Claude Code
 
-See the [Claude Code documentation](https://docs.anthropic.com/en/docs/claude-code) for hook configuration.
+Claude Code notifications are handled by the cmux Claude wrapper when Claude Code integration is enabled in Settings.
 
 ### GitHub Copilot CLI
 
-Copilot CLI supports [hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks) that run shell commands at key lifecycle events. Add to `~/.copilot/config.json`:
+Prefer `cmux hooks setup copilot` for the built-in integration. For a custom setup, Copilot CLI supports [hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks) that run shell commands at key lifecycle events.
+
+Add to `~/.copilot/config.json`:
 
 ```json
 {
@@ -168,24 +183,11 @@ Or for repo-level hooks, create `.github/hooks/notify.json`:
 
 ### OpenAI Codex
 
-Add to `~/.codex/config.toml`:
+Use `cmux hooks setup codex`. The installer enables Codex hooks, trusts the generated hook commands in `config.toml`, keeps hook-level approval events as telemetry, and lets `cmux codex-teams` bridge app-server approvals to Feed when you launch Codex through cmux.
 
-```toml
-notify = ["bash", "-c", "command -v cmux &>/dev/null && cmux notify --title Codex --body \"$(echo $1 | jq -r '.\"last-assistant-message\" // \"Turn complete\"' 2>/dev/null | head -c 100)\" || osascript -e 'display notification \"Turn complete\" with title \"Codex\"'", "--"]
-```
+### Antigravity
 
-Or create a simple script `~/.local/bin/codex-notify.sh`:
-
-```bash
-#!/bin/bash
-MSG=$(echo "$1" | jq -r '."last-assistant-message" // "Turn complete"' 2>/dev/null | head -c 100)
-command -v cmux &>/dev/null && cmux notify --title "Codex" --body "$MSG" || osascript -e "display notification \"$MSG\" with title \"Codex\""
-```
-
-Then use:
-```toml
-notify = ["bash", "~/.local/bin/codex-notify.sh"]
-```
+Use `cmux hooks setup antigravity` or `cmux hooks setup agy`. The installer writes Antigravity's native hook group to `~/.gemini/config/hooks.json`, records lifecycle/status notifications, and adds Feed telemetry/approval cards for `PreToolUse` and `PostToolUse`.
 
 ### OpenCode Plugin
 

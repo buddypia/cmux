@@ -1264,6 +1264,7 @@ enum TextBoxAgentDetection: CaseIterable {
     case claudeCode
     case codex
     case opencode
+    case antigravity
 
     private var definitionID: String {
         switch self {
@@ -1273,6 +1274,8 @@ enum TextBoxAgentDetection: CaseIterable {
             return "codex"
         case .opencode:
             return "opencode"
+        case .antigravity:
+            return "antigravity"
         }
     }
 
@@ -1284,6 +1287,8 @@ enum TextBoxAgentDetection: CaseIterable {
             return ["codex", "omx"]
         case .opencode:
             return ["opencode", "open-code", "opencode-ai", "omo"]
+        case .antigravity:
+            return ["antigravity", "agy"]
         }
     }
 
