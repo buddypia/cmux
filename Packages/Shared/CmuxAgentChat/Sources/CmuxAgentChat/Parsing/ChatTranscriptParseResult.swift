@@ -20,6 +20,13 @@ public struct ChatTranscriptParseResult: Sendable, Equatable {
     /// seq; callers replace the stored message by id.
     public let updatedMessages: [ChatMessage]
 
+    /// Live state transitions observed in this parse call that should not be
+    /// rendered as transcript rows.
+    public let stateUpdates: [ChatTranscriptStateUpdate]
+
+    /// Latest non-rendered session title update observed in this parse call.
+    public let titleUpdate: String?
+
     /// Carry-over state to pass into the next parse call.
     public let state: ChatTranscriptParseState
 
@@ -28,14 +35,20 @@ public struct ChatTranscriptParseResult: Sendable, Equatable {
     /// - Parameters:
     ///   - messages: Messages newly produced by this call.
     ///   - updatedMessages: Completed re-emissions of earlier messages.
+    ///   - stateUpdates: Non-rendered live state transitions from the lines.
+    ///   - titleUpdate: Non-rendered session title update from the lines.
     ///   - state: Carry-over state for the next call.
     public init(
         messages: [ChatMessage],
         updatedMessages: [ChatMessage],
+        stateUpdates: [ChatTranscriptStateUpdate] = [],
+        titleUpdate: String? = nil,
         state: ChatTranscriptParseState
     ) {
         self.messages = messages
         self.updatedMessages = updatedMessages
+        self.stateUpdates = stateUpdates
+        self.titleUpdate = titleUpdate
         self.state = state
     }
 }

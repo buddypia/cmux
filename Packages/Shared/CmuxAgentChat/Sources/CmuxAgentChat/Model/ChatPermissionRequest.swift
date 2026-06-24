@@ -1,8 +1,9 @@
 /// An actionable permission request from the agent, awaiting a decision.
 ///
-/// Synthesized by the host from agent hook events (transcripts do not carry
-/// permission prompts). Once answered, the host republishes the message with
-/// ``resolution`` set; renderers then freeze the card into a receipt.
+/// Usually synthesized by the host from agent hook events; some agent
+/// transcripts can also expose native permission events. Once answered, the
+/// host republishes the message with ``resolution`` set; renderers then freeze
+/// the card into a receipt.
 public struct ChatPermissionRequest: Sendable, Equatable, Codable {
     /// How the request was answered.
     public enum Resolution: String, Sendable, Equatable, Codable {

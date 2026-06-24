@@ -27,6 +27,15 @@ extension TerminalController {
         )
     }
 
+    /// Error shown when the mobile client asks to submit a multi-step
+    /// terminal form before its submit bar is ready.
+    static var chatSubmitNotReadyErrorMessage: String {
+        String(
+            localized: "mobile.chat.error.submitNotReady",
+            defaultValue: "This form is not ready to submit yet"
+        )
+    }
+
     /// Routes one `mobile.chat.*` method to its handler (single dispatch
     /// case in `mobileHostHandleRPC` keeps the god-file growth flat).
     func v2MobileChatDispatch(method: String, params: [String: Any]) async -> V2CallResult {
@@ -98,7 +107,7 @@ extension TerminalController {
     /// for callers that already hold the `Workspace` (the workspace-list RPC
     /// enumerates every workspace and adopts inline, so the toggle is known
     /// before the user enters the workspace — no per-open resolution and no
-    /// pop-in). Each `adoptDetectedClaudeSession` short-circuits in memory
+    /// pop-in). Each detected-agent adoption short-circuits in memory
     /// once the surface has a session, so a repeat scan of an already-adopted
     /// workspace touches no filesystem.
     func adoptDetectedAgentSessions(workspace: Workspace) {
@@ -107,25 +116,63 @@ extension TerminalController {
         for panel in workspace.panels.values.compactMap({ $0 as? TerminalPanel }) {
             let context = WorkspaceContentView.terminalAgentContext(panel: panel, workspace: workspace)
             let title = workspace.panelTitle(panelId: panel.id) ?? panel.displayTitle
-            let normalizedTitle = title.lowercased()
-            // Claude is the case the wrapper-launched workflow hits; detect by
-            // launch metadata (hook PID key / initial command) or the live
-            // terminal title claude sets ("✳ Claude Code", then "✳ <ai-title>").
-            let isClaude = TextBoxAgentDetection.isClaudeCode(context: context)
-                || normalizedTitle.contains("claude")
-                || title.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("✳")
-            guard isClaude else { continue }
+            guard let agentKind = Self.mobileChatDetectedAdoptableAgentKind(
+                context: context,
+                title: title
+            ) else { continue }
             let cwd = workspace.panelDirectories[panel.id]
                 ?? (panel.directory.isEmpty ? nil : panel.directory)
                 ?? (workspace.currentDirectory.isEmpty ? nil : workspace.currentDirectory)
             guard let cwd, !cwd.isEmpty else { continue }
-            service.adoptDetectedClaudeSession(
-                workspaceID: workspaceID,
-                surfaceID: panel.id.uuidString,
-                workingDirectory: cwd,
-                titleHint: title
-            )
+            switch agentKind {
+            case .claude:
+                service.adoptDetectedClaudeSession(
+                    workspaceID: workspaceID,
+                    surfaceID: panel.id.uuidString,
+                    workingDirectory: cwd,
+                    titleHint: title
+                )
+            case .antigravity:
+                service.adoptDetectedAntigravitySession(
+                    workspaceID: workspaceID,
+                    surfaceID: panel.id.uuidString,
+                    workingDirectory: cwd
+                )
+            case .codex:
+                service.adoptDetectedCodexSession(
+                    workspaceID: workspaceID,
+                    surfaceID: panel.id.uuidString,
+                    workingDirectory: cwd
+                )
+            case .other:
+                break
+            }
         }
+    }
+
+    /// Agent kinds whose unhooked sessions can be adopted from terminal
+    /// metadata/title plus a cwd-matched transcript/rollout.
+    private static func mobileChatDetectedAdoptableAgentKind(
+        context: String,
+        title: String
+    ) -> ChatAgentKind? {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTitle = trimmedTitle.lowercased()
+        if mobileChatLooksLikeAntigravity(context: context, normalizedTitle: normalizedTitle) {
+            return .antigravity
+        }
+        if mobileChatLooksLikeCodex(context: context, normalizedTitle: normalizedTitle) {
+            return .codex
+        }
+        // Claude is the wrapper-launched workflow: detect by launch metadata
+        // (hook PID key / initial command) or the live terminal title Claude
+        // sets ("✳ Claude Code", then "✳ <ai-title>").
+        if TextBoxAgentDetection.isClaudeCode(context: context)
+            || normalizedTitle.contains("claude")
+            || trimmedTitle.hasPrefix("✳") {
+            return .claude
+        }
+        return nil
     }
 
     /// `mobile.chat.history`: one transcript page for a session.
@@ -191,6 +238,15 @@ extension TerminalController {
             return .err(code: "not_found", message: Self.chatTerminalBindingErrorMessage, data: [
                 "session_id": sessionID
             ])
+        }
+        if let visibleText = terminalPanel.surface.visibleText(),
+           let plan = ChatTerminalMenuPlanner.freeTextSelectionPlan(screen: visibleText) {
+            for keyName in plan.keys {
+                let keyResult = terminalPanel.sendNamedKeyResult(keyName)
+                guard keyResult.accepted else {
+                    return mobileChatInputError(keyResult)
+                }
+            }
         }
         let clearResult = mobileChatClearPrompt(terminalPanel)
         guard clearResult.accepted else {
@@ -274,11 +330,10 @@ extension TerminalController {
         return .ok(["interrupted": true, "hard": hard])
     }
 
-    /// `mobile.chat.answer`: answer an in-terminal choice by display index
-    /// (agent TUIs accept the option's number key).
+    /// `mobile.chat.answer`: answer an in-terminal choice by display index,
+    /// or submit the current completed multi-step form.
     func v2MobileChatAnswer(params: [String: Any]) -> V2CallResult {
-        guard let sessionID = v2RawString(params, "session_id"),
-              let optionIndex = v2Int(params, "option_index"), optionIndex >= 0, optionIndex < 9 else {
+        guard let sessionID = v2RawString(params, "session_id") else {
             return .err(code: "invalid_params", message: "Missing session_id or option_index", data: nil)
         }
         guard let terminalPanel = mobileChatTerminalPanel(sessionID: sessionID) else {
@@ -286,12 +341,58 @@ extension TerminalController {
                 "session_id": sessionID
             ])
         }
+
+        if v2ActionKey(params) == "submit" {
+            guard let visibleText = terminalPanel.surface.visibleText(),
+                  let keys = ChatTerminalMenuPlanner.submitPlan(screen: visibleText) else {
+                return .err(code: "invalid_state", message: Self.chatSubmitNotReadyErrorMessage, data: [
+                    "session_id": sessionID
+                ])
+            }
+            for keyName in keys {
+                let keyResult = terminalPanel.sendNamedKeyResult(keyName)
+                guard keyResult.accepted else {
+                    return mobileChatInputError(keyResult)
+                }
+            }
+            terminalPanel.surface.forceRefresh(reason: "mobileHost.chatSubmit")
+            return .ok([
+                "answered": true,
+                "action": "submit",
+                "input": "keys",
+            ])
+        }
+
+        guard let optionIndex = v2Int(params, "option_index"), optionIndex >= 0, optionIndex < 100 else {
+            return .err(code: "invalid_params", message: "Missing session_id or option_index", data: nil)
+        }
+
+        if let visibleText = terminalPanel.surface.visibleText(),
+           let plan = ChatTerminalMenuPlanner.selectionPlan(screen: visibleText, optionIndex: optionIndex) {
+            for keyName in plan.keys {
+                let keyResult = terminalPanel.sendNamedKeyResult(keyName)
+                guard keyResult.accepted else {
+                    return mobileChatInputError(keyResult)
+                }
+            }
+            terminalPanel.surface.forceRefresh(reason: "mobileHost.chatAnswer")
+            return .ok([
+                "answered": true,
+                "option_index": optionIndex,
+                "input": "keys",
+                "target_number": plan.targetNumber,
+            ])
+        }
+
+        guard optionIndex < 9 else {
+            return .err(code: "invalid_params", message: "Missing session_id or option_index", data: nil)
+        }
         let digit = String(optionIndex + 1)
         let sendResult = terminalPanel.surface.sendInputResult(digit)
         switch sendResult {
         case .sent, .queued:
             terminalPanel.surface.forceRefresh(reason: "mobileHost.chatAnswer")
-            return .ok(["answered": true, "option_index": optionIndex])
+            return .ok(["answered": true, "option_index": optionIndex, "input": "digit"])
         case .inputQueueFull, .surfaceUnavailable, .processExited:
             return .err(code: "surface_unavailable", message: String(
                 localized: "mobile.chat.error.answerNotAccepted",
@@ -364,20 +465,51 @@ extension TerminalController {
         let title = resolved.workspace.panelTitle(panelId: terminalPanel.id) ?? terminalPanel.displayTitle
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let context = WorkspaceContentView.terminalAgentContext(panel: terminalPanel, workspace: resolved.workspace)
+        let looksLikeAntigravity = Self.mobileChatLooksLikeAntigravity(
+            context: context,
+            normalizedTitle: normalizedTitle
+        )
+        let looksLikeCodex = Self.mobileChatLooksLikeCodex(
+            context: context,
+            normalizedTitle: normalizedTitle
+        )
         switch record.agentKind {
         case .claude:
-            return TextBoxAgentDetection.isClaudeCode(context: context)
-                || normalizedTitle.contains("claude")
-                || title.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("✳")
+            return !looksLikeAntigravity && !looksLikeCodex && (
+                TextBoxAgentDetection.isClaudeCode(context: context)
+                    || normalizedTitle.contains("claude")
+                    || title.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("✳")
+            )
         case .codex:
-            return TextBoxAgentDetection.codex.matches(context: context)
-                || normalizedTitle.contains("codex")
+            return looksLikeCodex
+        case .antigravity:
+            return looksLikeAntigravity
         case .other(let source):
             return !source.isEmpty && (
                 context.localizedCaseInsensitiveContains(source)
                     || normalizedTitle.contains(source.lowercased())
             )
         }
+    }
+
+    private static func mobileChatLooksLikeCodex(context: String, normalizedTitle: String) -> Bool {
+        TextBoxAgentDetection.codex.matches(context: context)
+            || normalizedTitle.contains("codex")
+    }
+
+    private static func mobileChatLooksLikeAntigravity(context: String, normalizedTitle: String) -> Bool {
+        TextBoxAgentDetection.antigravity.matches(context: context)
+            || normalizedTitle.contains("antigravity")
+            || mobileChatTextContainsAgentToken(normalizedTitle, token: "agy")
+            || context.localizedCaseInsensitiveContains("antigravity")
+            || mobileChatTextContainsAgentToken(context, token: "agy")
+    }
+
+    private static func mobileChatTextContainsAgentToken(_ text: String, token: String) -> Bool {
+        text
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .contains { $0 == token }
     }
 
     private func mobileChatTerminalPanel(sessionID: String) -> TerminalPanel? {

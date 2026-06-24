@@ -1095,7 +1095,7 @@ struct FeedItemRow: View, Equatable {
             Spacer(minLength: 4)
             HStack(spacing: 4) {
                 chip(
-                    text: snapshot.source.rawValue.capitalized,
+                    text: snapshot.source.feedDisplayName,
                     fg: sourceChipForeground,
                     bg: sourceChipBackground
                 )
@@ -1174,6 +1174,11 @@ struct FeedItemRow: View, Equatable {
         switch snapshot.source {
         case .claude: return Color(red: 0.92, green: 0.54, blue: 0.29)
         case .codex: return .green
+        case .grok: return Color(red: 0.25, green: 0.68, blue: 0.88)
+        case .omp: return Color(red: 0.72, green: 0.48, blue: 0.92)
+        case .kiro: return Color(red: 0.86, green: 0.46, blue: 0.18)
+        case .antigravity: return Color(red: 0.98, green: 0.42, blue: 0.52)
+        case .rovodev: return Color(red: 0.22, green: 0.61, blue: 0.42)
         case .opencode: return .blue
         case .hermesAgent: return .teal
         case .cursor: return .purple
@@ -1286,16 +1291,16 @@ struct FeedItemRow: View, Equatable {
     private var primaryTitle: String {
         switch snapshot.payload {
         case .permissionRequest(_, let toolName, _, _):
-            return "\(snapshot.source.rawValue.capitalized) · \(toolName)"
+            return "\(snapshot.source.feedDisplayName) · \(toolName)"
         case .exitPlan:
-            return "\(snapshot.source.rawValue.capitalized) · \(String(localized: "feed.kind.exitPlan", defaultValue: "Exit plan"))"
+            return "\(snapshot.source.feedDisplayName) · \(String(localized: "feed.kind.exitPlan", defaultValue: "Exit plan"))"
         case .question:
-            return "\(snapshot.source.rawValue.capitalized) · \(String(localized: "feed.kind.question", defaultValue: "Question"))"
+            return "\(snapshot.source.feedDisplayName) · \(String(localized: "feed.kind.question", defaultValue: "Question"))"
         default:
             if let title = snapshot.title, !title.isEmpty {
-                return "\(snapshot.source.rawValue.capitalized) · \(title)"
+                return "\(snapshot.source.feedDisplayName) · \(title)"
             }
-            return snapshot.source.rawValue.capitalized
+            return snapshot.source.feedDisplayName
         }
     }
 
@@ -1357,6 +1362,39 @@ struct FeedItemRow: View, Equatable {
 
 // MARK: - Per-kind action areas
 
+private extension WorkstreamSource {
+    var feedDisplayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        case .antigravity: return "Antigravity"
+        case .hermesAgent: return "Hermes Agent"
+        case .rovodev: return "Rovo Dev"
+        case .opencode: return "OpenCode"
+        case .codebuddy: return "CodeBuddy"
+        default: return rawValue.capitalized
+        }
+    }
+
+    var feedRendersMarkdownText: Bool {
+        switch self {
+        case .claude, .codex, .antigravity:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var feedSupportsPlanQuestionShortcuts: Bool {
+        switch self {
+        case .claude, .codex, .antigravity:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 private struct FeedContextBlock: View {
     let context: WorkstreamContext
     let source: WorkstreamSource
@@ -1377,7 +1415,7 @@ private struct FeedContextBlock: View {
                     text: preamble,
                     labelColor: .secondary,
                     textColor: .secondary,
-                    rendersMarkdown: source == .claude
+                    rendersMarkdown: source.feedRendersMarkdownText
                 )
             }
             if let plan = context.planSummary {
@@ -1386,7 +1424,7 @@ private struct FeedContextBlock: View {
                     text: plan,
                     labelColor: Color.purple.opacity(0.85),
                     textColor: .secondary,
-                    rendersMarkdown: source == .claude
+                    rendersMarkdown: source.feedRendersMarkdownText
                 )
             }
         }
@@ -1394,7 +1432,7 @@ private struct FeedContextBlock: View {
     }
 
     private var agentLabel: String {
-        "\(source.rawValue.capitalized):"
+        "\(source.feedDisplayName):"
     }
 }
 
@@ -2247,7 +2285,7 @@ private struct ExitPlanActionArea: View {
         VStack(alignment: .leading, spacing: 10) {
             PlanBodyView(
                 plan: preview.planText,
-                rendersMarkdown: source == .claude
+                rendersMarkdown: source.feedRendersMarkdownText
             )
             if !preview.allowedPrompts.isEmpty {
                 ExitPlanAllowedPromptsView(prompts: preview.allowedPrompts)
@@ -2259,7 +2297,7 @@ private struct ExitPlanActionArea: View {
                 TextField(
                     String(
                         localized: "feed.exitplan.feedback.placeholder",
-                        defaultValue: "Tell Claude what to change…"
+                        defaultValue: "Tell \(source.feedDisplayName) what to change…"
                     ),
                     text: $feedback,
                     axis: .vertical
@@ -2463,7 +2501,7 @@ private struct FeedMarkdownInlineText: View {
 
 /// Renders plan text as a stack of small structured sections. Block
 /// headings, lists, and paragraphs keep the Feed's compact rhythm, while
-/// Claude markdown inside each line gets parsed tastefully. Heading text
+/// Agent markdown inside each line gets parsed tastefully. Heading text
 /// intentionally stays at body scale.
 private struct PlanBodyView: View {
     let plan: String
@@ -2691,7 +2729,7 @@ private struct QuestionActionArea: View {
     }
 
     private var agentLabel: String {
-        "\(source.rawValue.capitalized):"
+        "\(source.feedDisplayName):"
     }
 
     /// Long-form rendering: single question with rich options. Each
@@ -3070,7 +3108,7 @@ private struct QuestionActionArea: View {
     }
 
     private var isPlanAskUserQuestion: Bool {
-        guard source == .claude else { return false }
+        guard source.feedSupportsPlanQuestionShortcuts else { return false }
         if let mode = context?.permissionMode {
             return mode.caseInsensitiveCompare("plan") == .orderedSame
         }
@@ -3751,7 +3789,7 @@ private struct TelemetryActionArea: View {
         if case .todos(let todos) = snapshot.payload {
             TodoListBody(todos: todos)
         } else if case .assistantMessage(let text) = snapshot.payload,
-                  snapshot.source == .claude {
+                  snapshot.source.feedRendersMarkdownText {
             FeedMarkdownInlineText(
                 text: text,
                 fontSize: 11,

@@ -203148,6 +203148,23 @@
         }
       }
     },
+    "mobile.chat.error.submitNotReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This form is not ready to submit yet"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このフォームはまだ送信できません"
+          }
+        }
+      }
+    },
     "paneMemoryGuardrail.banner.title": {
       "extractionState": "manual",
       "localizations": {

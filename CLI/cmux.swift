@@ -31145,13 +31145,16 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
         var summary: String?
         if lower == "bash" {
             summary = firstString(in: dict, keys: ["description", "command"])
-        } else if lower == "run_command" || lower == "execute_bash" || lower == "shell" {
-            summary = firstString(in: dict, keys: ["CommandLine", "commandLine", "command", "Cwd", "cwd"])
+        } else if ["exec_command", "run_command", "run_shell_command", "execute_bash", "shell"].contains(lower) {
+            summary = firstString(
+                in: dict,
+                keys: ["CommandLine", "commandLine", "command", "cmd", "query", "Cwd", "cwd"]
+            )
         } else if ["write", "edit", "multiedit", "read", "fs_read", "fs_write"].contains(lower) {
             summary = firstString(in: dict, keys: ["file_path", "path"]) ?? firstOperationPath(in: dict)
         } else if ["view_file", "write_to_file", "replace_file_content", "multi_replace_file_content"].contains(lower) {
             summary = firstString(in: dict, keys: ["AbsolutePath", "TargetFile", "SearchPath", "DirectoryPath", "path"])
-        } else if lower == "askuserquestion" || lower == "ask_question" {
+        } else if ["askuserquestion", "ask_user_question", "ask_question", "request_user_input"].contains(lower) {
             if let questions = dict["questions"] as? [[String: Any]],
                let first = questions.first {
                 summary = firstString(in: first, keys: ["question", "prompt", "header"])

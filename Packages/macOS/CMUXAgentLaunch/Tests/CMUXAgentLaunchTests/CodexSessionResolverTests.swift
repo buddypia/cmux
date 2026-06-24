@@ -24,6 +24,29 @@ struct CodexSessionResolverTests {
         #expect(CodexSessionResolver().inferredCodexSessionId(cwd: cwd.path, env: env) == "newer")
     }
 
+    @Test("Returns the rollout path and skips claimed sessions")
+    func returnsPathAndSkipsClaimedSessions() throws {
+        let root = tempRoot("claimed")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let codexHome = root.appendingPathComponent("codex", isDirectory: true)
+        let cwd = try makeDir(root.appendingPathComponent("repo", isDirectory: true))
+
+        try writeRollout(codexHome: codexHome, shard: "2026/06/14", sessionId: "older", cwd: cwd.path,
+                         modified: Date(timeIntervalSince1970: 100))
+        try writeRollout(codexHome: codexHome, shard: "2026/06/15", sessionId: "claimed", cwd: cwd.path,
+                         modified: Date(timeIntervalSince1970: 500))
+
+        let env = ["CODEX_HOME": codexHome.path]
+        let result = CodexSessionResolver().inferredCodexSession(
+            cwd: cwd.path,
+            env: env,
+            excludingSessionIDs: ["claimed"]
+        )
+
+        #expect(result?.sessionId == "older")
+        #expect(result?.transcriptPath.hasSuffix("/rollout-2026-06-15T00-00-00-older.jsonl") == true)
+    }
+
     @Test("Returns nil for missing or non-matching cwd")
     func rejectsMissingAndNonMatchingCwd() throws {
         let root = tempRoot("reject")

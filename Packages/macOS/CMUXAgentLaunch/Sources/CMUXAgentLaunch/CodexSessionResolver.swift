@@ -47,6 +47,24 @@ public struct CodexSessionResolver {
     ///     comparison so an aliased path still matches the rollout's `cwd`.
     ///   - env: The process environment, read for a `CODEX_HOME` override.
     public func inferredCodexSessionId(cwd: String?, env: [String: String]) -> String? {
+        inferredCodexSession(cwd: cwd, env: env)?.sessionId
+    }
+
+    /// Returns the newest Codex rollout whose recorded `cwd` matches `cwd`,
+    /// plus the rollout path. `excludingSessionIDs` lets callers avoid binding
+    /// two live surfaces to the same conversation when several terminals share
+    /// a working directory.
+    ///
+    /// - Parameters:
+    ///   - cwd: The live process working directory; symlink-normalized before
+    ///     comparison so an aliased path still matches the rollout's `cwd`.
+    ///   - env: The process environment, read for a `CODEX_HOME` override.
+    ///   - excludingSessionIDs: Session ids already claimed by another surface.
+    public func inferredCodexSession(
+        cwd: String?,
+        env: [String: String],
+        excludingSessionIDs: Set<String> = []
+    ) -> (sessionId: String, transcriptPath: String)? {
         guard let normalizedCwd = RovoDevIndex.normalizedPath(cwd), !normalizedCwd.isEmpty else {
             return nil
         }
@@ -87,11 +105,12 @@ public struct CodexSessionResolver {
             guard peeks < maxPeeks else { break }
             peeks += 1
             guard let meta = peekSessionMeta(url: file.url),
+                  !excludingSessionIDs.contains(meta.sessionId),
                   let metaCwd = RovoDevIndex.normalizedPath(meta.cwd),
                   metaCwd == normalizedCwd else {
                 continue
             }
-            return meta.sessionId
+            return (sessionId: meta.sessionId, transcriptPath: file.url.path)
         }
         return nil
     }

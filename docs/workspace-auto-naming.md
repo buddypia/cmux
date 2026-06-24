@@ -8,7 +8,7 @@ Off by default. Enable it in **Settings > Automation > Workspace Auto-Naming** o
 
 - At the end of an agent turn, cmux summarizes the session's recent conversation into a 2-5 word title (in the conversation's language) and applies it to the workspace. When a workspace has multiple tabs, the agent's own tab is named too.
 - Names refresh when the topic shifts, throttled by transcript growth and a minimum interval, so quiet or single-topic sessions converge to a stable name without repeated summarization calls.
-- Summarization runs through your own agent binary: `claude -p` for Claude Code sessions (model from `ANTHROPIC_SMALL_FAST_MODEL` when set, the fast default otherwise; Vertex/Bedrock backend selection is preserved), `codex exec` for Codex sessions, and each supported hook agent's own non-interactive CLI for its sessions. Each agent names itself, so the calls use the account you already authenticated, and a machine without another agent installed simply skips that adapter.
+- Summarization runs through your own agent binary: `claude -p` for Claude Code sessions (model from `ANTHROPIC_SMALL_FAST_MODEL` when set, the fast default otherwise; Vertex/Bedrock backend selection is preserved), `codex exec` for Codex sessions, and each supported hook agent's own non-interactive CLI for its sessions. Antigravity is source-only for now: it can be named by a configured supported summarizer such as Claude Code or Codex, but `agy` itself is not invoked. Calls use the account you already authenticated, and a machine without a required summarizer installed simply skips that pass.
 
 ## Precedence: manual names always win
 
@@ -35,12 +35,13 @@ Auto-naming currently has source adapters and summarizer runners for:
 - Grok: reads Grok's `chat_history.jsonl` for the active session and summarizes with `grok --prompt-file` with tools and web search disabled.
 - OpenCode: caches recent prompt/assistant text from the cmux OpenCode session plugin and summarizes with `opencode run --pure` from an isolated temporary directory.
 - Pi and OMP: cache prompt/assistant text from their cmux hooks and summarize with their own non-interactive CLIs (`pi --print --no-tools` and `omp --print --no-tools`).
+- Antigravity: reads the active Antigravity transcript (`.json` or `.jsonl`) when available, but only runs naming if `automation.autoNamingAgent` points at a supported safe summarizer such as Claude Code or Codex. `agy` itself is not used as the summarizer yet.
 
 The other hook integrations are intentionally skipped for now:
 
 - Amp's current cmux plugin reports lifecycle/status but does not expose a usable prompt or assistant transcript.
 - Gemini has hook payload text, but the available non-interactive CLI invocation has not been verified to disable tools/project access, so it is skipped rather than running untrusted transcript text through a tool-capable summarizer.
-- Cursor, Antigravity, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder have cmux Stop/notification hooks, but this branch does not yet have both a verified transcript source and a safe cheap non-interactive summarizer invocation that disables tools/project access.
+- Cursor, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder have cmux Stop/notification hooks, but this branch does not yet have both a verified transcript source and a safe cheap non-interactive summarizer invocation that disables tools/project access.
 
 ## Mechanics
 
