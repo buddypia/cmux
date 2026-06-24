@@ -60,8 +60,14 @@ struct FeedEventClassifier {
         case toolStartMaybeApproval
         /// A tool finished. Telemetry only.
         case toolEnd
+        /// The agent is about to compact conversation context. Telemetry only.
+        case preCompact
+        /// The agent finished compacting conversation context. Telemetry only.
+        case postCompact
         /// A new turn / prompt started. Telemetry only.
         case promptSubmit
+        /// A subagent started. Telemetry only.
+        case subagentStart
         /// The agent finished responding. Telemetry only.
         case response
         /// A subagent finished responding. Telemetry only.
@@ -92,10 +98,9 @@ struct FeedEventClassifier {
     /// than the generic `PermissionRequest`. Returns the actionable wire
     /// mapping for such a tool, or `nil` for ordinary tools.
     private static func dedicatedApprovalEvent(for toolName: String) -> (String, Bool)? {
-        switch toolName.lowercased() {
-        case "exitplanmode": return ("ExitPlanMode", true)
-        case "askuserquestion", "ask_user_question", "request_user_input":
-            return ("AskUserQuestion", true)
+        switch toolName {
+        case "ExitPlanMode": return ("ExitPlanMode", true)
+        case "AskUserQuestion": return ("AskUserQuestion", true)
         default: return nil
         }
     }
@@ -127,8 +132,14 @@ struct FeedEventClassifier {
             return ("PreToolUse", false)
         case .toolEnd:
             return ("PostToolUse", false)
+        case .preCompact:
+            return ("PreCompact", false)
+        case .postCompact:
+            return ("PostCompact", false)
         case .promptSubmit:
             return ("UserPromptSubmit", false)
+        case .subagentStart:
+            return ("SubagentStart", false)
         case .response:
             return ("Stop", false)
         case .subagentResponse:
@@ -162,10 +173,13 @@ struct FeedEventClassifier {
             "PermissionRequest": .approvalRequest,
             "PreToolUse": .toolStart,
             "PostToolUse": .toolEnd,
+            "PreCompact": .preCompact,
+            "PostCompact": .postCompact,
             "UserPromptSubmit": .promptSubmit,
             "SessionStart": .sessionStart,
             "SessionEnd": .sessionEnd,
             "Stop": .response,
+            "SubagentStart": .subagentStart,
             "SubagentStop": .subagentResponse,
             "Notification": .statusNotification,
         ],
@@ -174,15 +188,30 @@ struct FeedEventClassifier {
             // reviewer. Treat this as telemetry so "Approve for me" can still
             // use Codex's auto-review path instead of blocking on cmux Feed.
             "PermissionRequest": .toolStart,
+            "permission_request": .toolStart,
             "PreToolUse": .toolStart,
+            "pre_tool_use": .toolStart,
             "beforeShellExecution": .toolStart,
             "PostToolUse": .toolEnd,
+            "post_tool_use": .toolEnd,
+            "PreCompact": .preCompact,
+            "pre_compact": .preCompact,
+            "PostCompact": .postCompact,
+            "post_compact": .postCompact,
             "UserPromptSubmit": .promptSubmit,
+            "user_prompt_submit": .promptSubmit,
             "SessionStart": .sessionStart,
+            "session_start": .sessionStart,
             "SessionEnd": .sessionEnd,
+            "session_end": .sessionEnd,
             "Stop": .response,
+            "stop": .response,
+            "SubagentStart": .subagentStart,
+            "subagent_start": .subagentStart,
             "SubagentStop": .subagentResponse,
+            "subagent_stop": .subagentResponse,
             "Notification": .statusNotification,
+            "notification": .statusNotification,
         ],
         "hermes-agent": [
             // `pre_tool_call` is a tool *starting* — Hermes raises a
@@ -227,10 +256,13 @@ struct FeedEventClassifier {
         "beforeShellExecution": .toolStartMaybeApproval,
         "PermissionRequest": .approvalRequest,
         "PostToolUse": .toolEnd,
+        "PreCompact": .preCompact,
+        "PostCompact": .postCompact,
         "UserPromptSubmit": .promptSubmit,
         "SessionStart": .sessionStart,
         "SessionEnd": .sessionEnd,
         "Stop": .response,
+        "SubagentStart": .subagentStart,
         "SubagentStop": .subagentResponse,
         "Notification": .statusNotification,
     ]
@@ -260,14 +292,6 @@ struct FeedEventClassifier {
         "define_subagent",
         "manage_subagents",
         "generate_image",
-    ]
-
-    /// Antigravity/Gemini transcripts can name shell execution differently
-    /// across versions. Keep these aliases source-scoped so generic agents do
-    /// not inherit broad lowercase shell approvals.
-    private static let antigravitySideEffectingToolAliases: Set<String> = [
-        "execute_bash",
-        "run_shell_command",
     ]
 
     /// Kiro emits lowercase / internal tool names (`fs_write`,
@@ -301,17 +325,14 @@ struct FeedEventClassifier {
     ]
 
     /// Whether a tool mutates state and deserves an approval prompt. Exact
-    /// match against ``sideEffectingTools`` for every source; Antigravity and
-    /// Kiro additionally match their case-insensitive internal aliases. Kept
-    /// source-scoped so another agent's lowercase tool name is not escalated
-    /// into an approval.
+    /// match against ``sideEffectingTools`` for every source; the `kiro`
+    /// source additionally matches its case-insensitive internal aliases.
+    /// Kept source-scoped so another agent's lowercase tool name is not
+    /// escalated into an approval.
     static func isSideEffectingTool(_ toolName: String, source: String) -> Bool {
         guard !toolName.isEmpty else { return false }
         if sideEffectingTools.contains(toolName) {
             return true
-        }
-        if source == "antigravity" {
-            return antigravitySideEffectingToolAliases.contains(toolName.lowercased())
         }
         if source == "kiro" {
             return kiroSideEffectingToolAliases.contains(toolName.lowercased())

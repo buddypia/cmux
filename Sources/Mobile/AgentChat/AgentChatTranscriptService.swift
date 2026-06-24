@@ -18,10 +18,10 @@ final class AgentChatTranscriptService {
     /// explicit history request retries, so per-hook-event resolution
     /// failures don't rescan the filesystem during tool storms.
     private var failedResolutions: Set<String> = []
-    /// Last time title/metadata adoption ran a filesystem scan for a surface
-    /// that had no session yet. Claude title adoption uses the raw surface id
-    /// because its resolver is scheduled by the title-detection extension;
-    /// Codex/Antigravity adoption uses an agent + surface key. A successful
+    /// Last time `adoptDetectedClaudeSession` ran a filesystem scan for a
+    /// surface that had no session yet, keyed by surface id. Bounds transcript
+    /// resolution scheduling to once per `detectionScanThrottle` while a
+    /// title-detected claude has not yet written its transcript; a successful
     /// adoption removes the entry.
     var detectionScanAt: [String: Date] = [:]
     private var ghosttyTitleSubscription: GhosttyTitleChangeSubscription?
@@ -76,9 +76,8 @@ final class AgentChatTranscriptService {
     /// Watches terminal title changes so a coding agent launched without a
     /// hook (e.g. via a shell wrapper that bypasses cmux's hook injection) is
     /// adopted the instant its terminal title becomes the agent's (e.g.
-    /// "✳ Claude Code" or "Antigravity"), not only when the workspace is next
-    /// opened. Adoption emits a descriptor change, which pushes the toggle to
-    /// listening phones.
+    /// "✳ Claude Code"), not only when the workspace is next opened. Adoption
+    /// emits a descriptor change, which pushes the toggle to listening phones.
     private func observeAgentTitleChanges() {
         ghosttyTitleSubscription = GhosttyTitleChangeSubscription { [weak self] change in
             self?.scheduleTitleDetectedAdoption(change)
@@ -189,100 +188,6 @@ final class AgentChatTranscriptService {
             titleHint: titleHint,
             forceScan: false
         )
-        return true
-    }
-
-    /// Adopts a Codex session detected from launch metadata or terminal title
-    /// once a cwd-matching rollout exists on disk. Codex rollouts are
-    /// per-session JSONL files, so adoption waits for the real rollout id
-    /// rather than creating a provisional id.
-    ///
-    /// - Parameters:
-    ///   - workspaceID: The agent's workspace UUID string.
-    ///   - surfaceID: The hosting terminal surface UUID string.
-    ///   - workingDirectory: The agent's working directory.
-    /// - Returns: `true` when a session is present for the surface afterward.
-    @discardableResult
-    func adoptDetectedCodexSession(
-        workspaceID: String,
-        surfaceID: String,
-        workingDirectory: String
-    ) -> Bool {
-        if let bound = registry.sessions(workspaceID: nil)
-            .first(where: { $0.surfaceID == surfaceID && $0.state != .ended }) {
-            registry.update(sessionID: bound.sessionID) { record in
-                record.workspaceID = workspaceID
-                record.surfaceID = surfaceID
-                record.workingDirectory = workingDirectory
-            }
-            return true
-        }
-        guard let resolved = newestCodexTranscript(
-            workingDirectory: workingDirectory,
-            surfaceID: surfaceID,
-            excludingSessionID: nil
-        ) else {
-            return false
-        }
-        detectionScanAt.removeValue(forKey: detectionScanKey(agentKind: .codex, surfaceID: surfaceID))
-        registry.adoptDetectedSession(
-            sessionID: resolved.sessionID,
-            agentKind: .codex,
-            workspaceID: workspaceID,
-            surfaceID: surfaceID,
-            workingDirectory: workingDirectory,
-            transcriptPath: resolved.path,
-            at: Date()
-        )
-        return true
-    }
-
-    /// Adopts an Antigravity session detected from launch metadata or terminal
-    /// title once its shared history file contains a cwd-matching conversation
-    /// id. Unlike Claude, Antigravity cannot use a provisional session id:
-    /// the parser filters the shared history by conversation id, so a fake id
-    /// would create a chat row that can never show messages.
-    ///
-    /// - Parameters:
-    ///   - workspaceID: The agent's workspace UUID string.
-    ///   - surfaceID: The hosting terminal surface UUID string.
-    ///   - workingDirectory: The agent's working directory.
-    /// - Returns: `true` when a session is present for the surface afterward.
-    @discardableResult
-    func adoptDetectedAntigravitySession(
-        workspaceID: String,
-        surfaceID: String,
-        workingDirectory: String
-    ) -> Bool {
-        if let bound = registry.sessions(workspaceID: nil)
-            .first(where: { $0.surfaceID == surfaceID && $0.state != .ended }) {
-            registry.update(sessionID: bound.sessionID) { record in
-                record.workspaceID = workspaceID
-                record.surfaceID = surfaceID
-                record.workingDirectory = workingDirectory
-            }
-            return true
-        }
-        guard let resolved = newestAntigravityTranscript(
-            workingDirectory: workingDirectory,
-            surfaceID: surfaceID,
-            excludingSessionID: nil
-        ) else {
-            return false
-        }
-        detectionScanAt.removeValue(forKey: detectionScanKey(agentKind: .antigravity, surfaceID: surfaceID))
-        registry.adoptDetectedSession(
-            sessionID: resolved.sessionID,
-            agentKind: .antigravity,
-            workspaceID: workspaceID,
-            surfaceID: surfaceID,
-            workingDirectory: workingDirectory,
-            transcriptPath: resolved.path,
-            at: Date()
-        )
-        if let title = resolved.title {
-            registry.update(sessionID: resolved.sessionID) { $0.title = title }
-        }
         return true
     }
 
@@ -409,7 +314,7 @@ final class AgentChatTranscriptService {
         if batch.didReset {
             emit(frame: ChatSessionEventFrame(sessionID: sessionID, event: .reset))
         }
-        if let title = batch.titleUpdate ?? batch.discoveredTitle {
+        if let title = batch.discoveredTitle {
             registry.update(sessionID: sessionID) { $0.title = title }
         }
         if !batch.appended.isEmpty {
@@ -418,48 +323,27 @@ final class AgentChatTranscriptService {
         if !batch.updated.isEmpty {
             emit(frame: ChatSessionEventFrame(sessionID: sessionID, event: .updated(batch.updated)))
         }
-        let stateSignalMessages = batch.updated + batch.appended
-        if let resolvedAt = ChatTranscriptStateSignal.resolvedInputTimestamp(in: stateSignalMessages) {
-            registry.noteTranscriptInputResolved(sessionID: sessionID, at: resolvedAt)
-        }
-        if let needsInputAt = ChatTranscriptStateSignal.needsInputTimestamp(in: batch.appended) {
-            registry.noteTranscriptNeedsInput(sessionID: sessionID, at: needsInputAt)
-        }
-        if !batch.stateUpdates.isEmpty {
-            applyTranscriptStateUpdates(batch.stateUpdates, sessionID: sessionID)
-        } else if let workingAt = ChatTranscriptStateSignal.workingTimestamp(in: batch.appended) {
-            registry.noteTranscriptWorking(sessionID: sessionID, at: workingAt)
-        } else if let completedWorkAt = ChatTranscriptStateSignal.completedWorkTimestamp(in: stateSignalMessages),
-                  !batch.hasPendingTranscriptWork {
-            registry.noteTranscriptWorkingResolved(sessionID: sessionID, at: completedWorkAt)
-        } else if let completedAt = ChatTranscriptStateSignal.completedAssistantTurnTimestamp(in: batch.appended) {
+        if let completedAt = Self.completedAssistantTurnTimestamp(in: batch.appended) {
             registry.noteAssistantTurnCompleted(sessionID: sessionID, at: completedAt)
         }
     }
 
-    private func applyTranscriptStateUpdates(
-        _ updates: [ChatTranscriptStateUpdate],
-        sessionID: String
-    ) {
-        for stateUpdate in ChatTranscriptStateUpdate.applicationOrder(updates) {
-            applyTranscriptStateUpdate(stateUpdate, sessionID: sessionID)
+    private static func completedAssistantTurnTimestamp(in messages: [ChatMessage]) -> Date? {
+        guard !messages.isEmpty else { return nil }
+        var completedAt: Date?
+        for message in messages where message.role == .agent {
+            switch message.kind {
+            case .prose, .thought, .unsupported:
+                completedAt = max(completedAt ?? message.timestamp, message.timestamp)
+            case .toolUse, .terminal, .fileEdit, .permissionRequest, .question:
+                return nil
+            case .status:
+                break
+            case .attachment:
+                break
+            }
         }
-    }
-
-    private func applyTranscriptStateUpdate(
-        _ stateUpdate: ChatTranscriptStateUpdate,
-        sessionID: String
-    ) {
-        switch stateUpdate.kind {
-        case .working:
-            registry.noteTranscriptWorking(sessionID: sessionID, at: stateUpdate.timestamp)
-        case .needsInput:
-            registry.noteTranscriptNeedsInput(sessionID: sessionID, at: stateUpdate.timestamp)
-        case .inputResolved:
-            registry.noteTranscriptInputResolved(sessionID: sessionID, at: stateUpdate.timestamp)
-        case .idle:
-            registry.noteTranscriptWorkingResolved(sessionID: sessionID, at: stateUpdate.timestamp)
-        }
+        return completedAt
     }
 
     private func handleRecordChange(_ record: AgentChatSessionRecord, previous: AgentChatSessionRecord?) {
@@ -513,14 +397,13 @@ final class AgentChatTranscriptService {
         titleHint: String?,
         forceScan: Bool
     ) -> (sessionID: String, path: String)? {
-        let key = detectionScanKey(agentKind: .claude, surfaceID: surfaceID)
         let now = Date()
         if !forceScan,
-           let lastScan = detectionScanAt[key],
+           let lastScan = detectionScanAt[surfaceID],
            now.timeIntervalSince(lastScan) < Self.detectionScanThrottle {
             return nil
         }
-        detectionScanAt[key] = now
+        detectionScanAt[surfaceID] = now
         var claimed = registry.claimedSessionIDs()
             .union(activeClaimedDetectedTranscriptSessionIDs(excludingSurfaceID: surfaceID))
         if let excludingSessionID {
@@ -531,54 +414,6 @@ final class AgentChatTranscriptService {
             excludingSessionIDs: claimed,
             titleHint: titleHint
         )
-    }
-
-    private func newestCodexTranscript(
-        workingDirectory: String,
-        surfaceID: String,
-        excludingSessionID: String?
-    ) -> (sessionID: String, path: String)? {
-        let key = detectionScanKey(agentKind: .codex, surfaceID: surfaceID)
-        let now = Date()
-        if let lastScan = detectionScanAt[key],
-           now.timeIntervalSince(lastScan) < Self.detectionScanThrottle {
-            return nil
-        }
-        detectionScanAt[key] = now
-        var claimed = registry.claimedSessionIDs()
-        if let excludingSessionID {
-            claimed.remove(excludingSessionID)
-        }
-        return resolver.newestCodexTranscript(
-            workingDirectory: workingDirectory,
-            excludingSessionIDs: claimed
-        )
-    }
-
-    private func newestAntigravityTranscript(
-        workingDirectory: String,
-        surfaceID: String,
-        excludingSessionID: String?
-    ) -> (sessionID: String, path: String, title: String?)? {
-        let key = detectionScanKey(agentKind: .antigravity, surfaceID: surfaceID)
-        let now = Date()
-        if let lastScan = detectionScanAt[key],
-           now.timeIntervalSince(lastScan) < Self.detectionScanThrottle {
-            return nil
-        }
-        detectionScanAt[key] = now
-        var claimed = registry.claimedSessionIDs()
-        if let excludingSessionID {
-            claimed.remove(excludingSessionID)
-        }
-        return resolver.newestAntigravityTranscript(
-            workingDirectory: workingDirectory,
-            excludingSessionIDs: claimed
-        )
-    }
-
-    private func detectionScanKey(agentKind: ChatAgentKind, surfaceID: String) -> String {
-        "\(agentKind.sourceName):\(surfaceID)"
     }
 
     private static func provisionalClaudeSessionID(surfaceID: String) -> String {
@@ -598,23 +433,6 @@ final class AgentChatTranscriptService {
             return nil
         }
         return specificClaudeTitleKey(title) ?? "generic:claude"
-    }
-
-    static func agentTitleDetectionKey(_ title: String?) -> String? {
-        guard let title else {
-            return nil
-        }
-        if let claudeKey = claudeTitleDetectionKey(title) {
-            return claudeKey
-        }
-        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized.contains("codex") {
-            return "generic:codex"
-        }
-        if normalized.contains("antigravity") || textContainsAgentToken(normalized, token: "agy") {
-            return "generic:antigravity"
-        }
-        return nil
     }
 
     static func specificClaudeTitleKey(_ title: String?) -> String? {
@@ -637,13 +455,6 @@ final class AgentChatTranscriptService {
 
     static func isSpecificClaudeTitle(_ title: String?) -> Bool {
         specificClaudeTitleKey(title) != nil
-    }
-
-    private static func textContainsAgentToken(_ text: String, token: String) -> Bool {
-        text
-            .lowercased()
-            .split { !$0.isLetter && !$0.isNumber }
-            .contains { $0 == token }
     }
 
     /// Encodes a wire value into the `[String: Any]` payload shape the

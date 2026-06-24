@@ -95,8 +95,6 @@ extension CMUXCLI {
             commands: [
                 "cmux hooks setup",
                 "cmux hooks setup <agent>",
-                "cmux hooks codex install",
-                "cmux hooks antigravity install",
                 "cmux hooks hermes-agent install",
                 "cmux hooks hermes-agent uninstall",
                 "cmux hooks <agent> uninstall",

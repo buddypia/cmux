@@ -121,10 +121,6 @@ public actor FixtureChatEventSource: ChatEventSource {
         emit(.stateChanged(.working(since: Date())))
     }
 
-    public func submit(sessionID: String) async throws {
-        emit(.stateChanged(.working(since: Date())))
-    }
-
     /// Pushes an event to every live subscriber and folds appended or
     /// updated messages into the backlog so later history reads see them.
     ///

@@ -282,26 +282,6 @@ struct AgentLaunchSanitizerTests {
         )
     }
 
-    @Test(
-        "Rejects non-restorable Codex utility commands",
-        arguments: ["archive", "delete", "unarchive", "plugin", "remote-control", "update", "doctor"]
-    )
-    func rejectsNonRestorableCodexUtilityCommands(command: String) {
-        #expect(
-            AgentLaunchSanitizer.sanitizedLaunchArguments(
-                [
-                    "codex",
-                    "--model",
-                    "gpt-5.4",
-                    command,
-                    "saved-session-id",
-                ],
-                launcher: "codex",
-                fallbackKind: "codex"
-            ) == nil
-        )
-    }
-
     @Test("Preserves Codex Teams fork launch context")
     func preservesCodexTeamsForkLaunchContext() {
         #expect(
@@ -430,46 +410,6 @@ struct AgentLaunchSanitizerTests {
                 launcher: "antigravity",
                 fallbackKind: "antigravity"
             ) == ["agy", "--sandbox", "danger-full-access"]
-        )
-    }
-
-    @Test("Preserves Antigravity model and pilot flags across restore")
-    func preservesAntigravityModelAndPilotFlags() {
-        #expect(
-            AgentLaunchSanitizer.sanitizedLaunchArguments(
-                [
-                    "agy",
-                    "--model",
-                    "gemini-3-pro",
-                    "--dangerously-skip-permissions",
-                    "--add-dir",
-                    "/tmp/extra repo",
-                    "initial prompt should not replay",
-                ],
-                launcher: "antigravity",
-                fallbackKind: "antigravity"
-            ) == [
-                "agy",
-                "--model",
-                "gemini-3-pro",
-                "--dangerously-skip-permissions",
-                "--add-dir",
-                "/tmp/extra repo",
-            ]
-        )
-    }
-
-    @Test(
-        "Rejects non-restorable Antigravity utility commands",
-        arguments: ["changelog", "help", "install", "models", "plugin", "plugins", "update"]
-    )
-    func rejectsNonRestorableAntigravityUtilityCommands(command: String) {
-        #expect(
-            AgentLaunchSanitizer.sanitizedLaunchArguments(
-                ["agy", command],
-                launcher: "antigravity",
-                fallbackKind: "antigravity"
-            ) == nil
         )
     }
 

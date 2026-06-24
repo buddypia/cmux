@@ -55,13 +55,4 @@ public protocol ChatEventSource: Sendable {
     ///   - optionIndex: Zero-based index of the chosen option.
     ///   - sessionID: The session being answered.
     func answer(optionIndex: Int, sessionID: String) async throws
-
-    /// Submits the current in-terminal multi-step form once all visible
-    /// steps are complete.
-    ///
-    /// Implementations inspect the bound terminal state and send the
-    /// agent-specific submit keys only when the form is ready.
-    ///
-    /// - Parameter sessionID: The session whose current form should submit.
-    func submit(sessionID: String) async throws
 }

@@ -82,6 +82,14 @@ struct FeedEventClassificationTests {
         #expect(classify("claude", "PermissionRequest", tool: "AskUserQuestion").name == "AskUserQuestion")
     }
 
+    @Test func claudeLifecycleFeedEventsStayTelemetryAndPreserveNames() {
+        for event in ["PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop"] {
+            let classification = classify("claude", event, tool: "Bash")
+            #expect(classification.name == event)
+            #expect(classification.actionable == false)
+        }
+    }
+
     // MARK: Generic agents without a dedicated approval event
 
     /// Agents whose only signal is `PreToolUse` (gemini, copilot, …) still
@@ -102,30 +110,6 @@ struct FeedEventClassificationTests {
         #expect(classify("gemini", "PreToolUse", tool: "ExitPlanMode").actionable == true)
         #expect(classify("gemini", "PreToolUse", tool: "AskUserQuestion").name == "AskUserQuestion")
         #expect(classify("gemini", "PreToolUse", tool: "AskUserQuestion").actionable == true)
-        #expect(classify("gemini", "PreToolUse", tool: "request_user_input").name == "AskUserQuestion")
-        #expect(classify("gemini", "PreToolUse", tool: "request_user_input").actionable == true)
-        #expect(classify("gemini", "PreToolUse", tool: "ask_user_question").name == "AskUserQuestion")
-        #expect(classify("gemini", "PreToolUse", tool: "ask_user_question").actionable == true)
-    }
-
-    /// Antigravity currently uses the generic pre-tool Feed table, but shell
-    /// execution names vary across transcript versions. Keep its shell aliases
-    /// actionable so command approvals surface in Feed.
-    @Test func antigravityRunCommandPreToolUseIsActionable() {
-        #expect(classify("antigravity", "PreToolUse", tool: "run_command").name == "PermissionRequest")
-        #expect(classify("antigravity", "PreToolUse", tool: "run_command").actionable == true)
-        #expect(classify("antigravity", "PreToolUse", tool: "run_shell_command").name == "PermissionRequest")
-        #expect(classify("antigravity", "PreToolUse", tool: "run_shell_command").actionable == true)
-        #expect(classify("antigravity", "PreToolUse", tool: "execute_bash").name == "PermissionRequest")
-        #expect(classify("antigravity", "PreToolUse", tool: "execute_bash").actionable == true)
-        #expect(classify("antigravity", "PreToolUse", tool: "request_user_input").name == "AskUserQuestion")
-        #expect(classify("antigravity", "PreToolUse", tool: "request_user_input").actionable == true)
-        #expect(classify("antigravity", "PreToolUse", tool: "ask_user_question").name == "AskUserQuestion")
-        #expect(classify("antigravity", "PreToolUse", tool: "ask_user_question").actionable == true)
-        #expect(classify("antigravity", "PreToolUse", tool: "read_file").name == "PreToolUse")
-        #expect(classify("antigravity", "PreToolUse", tool: "read_file").actionable == false)
-        #expect(classify("antigravity", "PostToolUse", tool: "run_command").name == "PostToolUse")
-        #expect(classify("antigravity", "PostToolUse", tool: "run_command").actionable == false)
     }
 
     /// Codex runs `PermissionRequest` hooks before its own approval reviewer,
@@ -137,8 +121,29 @@ struct FeedEventClassificationTests {
         #expect(classify("codex", "beforeShellExecution", tool: "shell").name == "PreToolUse")
         #expect(classify("codex", "PermissionRequest", tool: "shell").name == "PreToolUse")
         #expect(classify("codex", "PermissionRequest", tool: "shell").actionable == false)
-        #expect(classify("codex", "PreToolUse", tool: "request_user_input").name == "PreToolUse")
-        #expect(classify("codex", "PreToolUse", tool: "request_user_input").actionable == false)
+    }
+
+    @Test func codexLifecycleFeedEventsStayTelemetryAndPreserveNames() {
+        for event in ["PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop"] {
+            let classification = classify("codex", event, tool: "shell")
+            #expect(classification.name == event)
+            #expect(classification.actionable == false)
+        }
+    }
+
+    @Test func codexSnakeCaseLifecycleFeedEventsStayTelemetryAndPreserveNames() {
+        let cases = [
+            ("post_tool_use", "PostToolUse"),
+            ("pre_compact", "PreCompact"),
+            ("post_compact", "PostCompact"),
+            ("subagent_start", "SubagentStart"),
+            ("subagent_stop", "SubagentStop"),
+        ]
+        for (event, expectedName) in cases {
+            let classification = classify("codex", event, tool: "shell")
+            #expect(classification.name == expectedName)
+            #expect(classification.actionable == false)
+        }
     }
 
     /// Unknown source + unknown event is safe by default.

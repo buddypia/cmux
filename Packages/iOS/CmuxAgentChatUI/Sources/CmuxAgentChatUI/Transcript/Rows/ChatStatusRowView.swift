@@ -60,12 +60,6 @@ public struct ChatStatusRowView: View {
                 defaultValue: "Context compacted",
                 bundle: .module
             )
-        case .threadRolledBack:
-            return String(
-                localized: "chat.status.thread_rolled_back",
-                defaultValue: "Thread rolled back",
-                bundle: .module
-            )
         }
     }
 }

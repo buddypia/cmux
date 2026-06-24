@@ -86,23 +86,6 @@
         }
       }
     },
-    "chat.chip.submit" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Submit"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "送信"
-          }
-        }
-      }
-    },
     "chat.chip.terminal" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -681,23 +664,6 @@
         }
       }
     },
-    "chat.question.expired" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Expired"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "期限切れ"
-          }
-        }
-      }
-    },
     "chat.row.collapse.hint" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -813,23 +779,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "中断されました"
-          }
-        }
-      }
-    },
-    "chat.status.thread_rolled_back" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Thread rolled back"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "スレッドを巻き戻しました"
           }
         }
       }

@@ -30,17 +30,6 @@ enum TranscriptJSONValue: Sendable, Equatable, Codable {
         self = value
     }
 
-    /// Decodes one complete JSON document, returning `nil` for malformed JSON.
-    ///
-    /// - Parameter jsonString: The raw JSON text.
-    init?(jsonString: String) {
-        let data = Data(jsonString.utf8)
-        guard let value = try? JSONDecoder().decode(TranscriptJSONValue.self, from: data) else {
-            return nil
-        }
-        self = value
-    }
-
     /// Creates a value by trying each JSON shape in turn.
     ///
     /// - Parameter decoder: The decoder to read from.

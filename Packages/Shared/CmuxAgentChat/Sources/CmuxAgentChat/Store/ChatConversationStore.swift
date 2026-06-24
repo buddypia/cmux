@@ -321,16 +321,6 @@ public final class ChatConversationStore {
         }
     }
 
-    /// Submits the current completed in-terminal form.
-    public func submitCurrentForm() async {
-        do {
-            try await source.submit(sessionID: descriptor.id)
-            lastErrorDescription = nil
-        } catch {
-            lastErrorDescription = error.localizedDescription
-        }
-    }
-
     // MARK: - Event application
 
     private func loadInitialHistoryIfNeeded() async {

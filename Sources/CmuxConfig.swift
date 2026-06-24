@@ -357,7 +357,6 @@ extension CmuxSurfaceTabBarBuiltInAction {
 enum CmuxConfigAgentKind: Sendable, Hashable {
     case codex
     case claudeCode
-    case antigravity
 
     var commandName: String {
         switch self {
@@ -365,8 +364,6 @@ enum CmuxConfigAgentKind: Sendable, Hashable {
             return "codex"
         case .claudeCode:
             return "claude"
-        case .antigravity:
-            return "agy"
         }
     }
 
@@ -376,8 +373,6 @@ enum CmuxConfigAgentKind: Sendable, Hashable {
             return .symbol("sparkles")
         case .claudeCode:
             return .symbol("brain.head.profile")
-        case .antigravity:
-            return .symbol("paperplane")
         }
     }
 }
@@ -392,8 +387,6 @@ extension CmuxConfigAgentKind: Codable {
             self = .codex
         case "claude", "claudeCode", "claude-code":
             self = .claudeCode
-        case "antigravity", "agy":
-            self = .antigravity
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
@@ -411,8 +404,6 @@ extension CmuxConfigAgentKind: Codable {
             try container.encode("codex")
         case .claudeCode:
             try container.encode("claude")
-        case .antigravity:
-            try container.encode("antigravity")
         }
     }
 }
@@ -1605,8 +1596,6 @@ struct CmuxResolvedConfigAction: Identifiable, Sendable, Hashable {
                 return String(localized: "command.cmuxConfig.defaultCodexTitle", defaultValue: "Codex")
             case .claudeCode:
                 return String(localized: "command.cmuxConfig.defaultClaudeCodeTitle", defaultValue: "Claude Code")
-            case .antigravity:
-                return String(localized: "command.cmuxConfig.defaultAntigravityTitle", defaultValue: "Antigravity")
             }
         case .command:
             return id

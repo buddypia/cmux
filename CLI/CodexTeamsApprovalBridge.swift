@@ -1,7 +1,8 @@
 import Foundation
-import CMUXAgentLaunch
 
 enum CodexTeamsApprovalBridge {
+    private typealias CodexPermissionCapabilities = (supportsOnce: Bool, supportsAlways: Bool, supportsAll: Bool)
+
     static func feedEvent(
         method: String,
         requestId: Any,
@@ -196,23 +197,28 @@ enum CodexTeamsApprovalBridge {
     }
 
     static func feedSourceSupportsPersistentPermissionModes(_ source: String) -> Bool {
-        capabilities(source: source, toolInputJSON: nil).supportsPersistentModes
+        source != "hermes-agent"
     }
 
     static func feedSourceSupportsOncePermissionMode(_ source: String, toolInputJSON: String?) -> Bool {
-        capabilities(source: source, toolInputJSON: toolInputJSON).supportsOnce
+        guard source == "codex" else { return true }
+        return codexCapabilities(toolInputJSON: toolInputJSON).supportsOnce
     }
 
     static func feedSourceSupportsAlwaysPermissionMode(_ source: String, toolInputJSON: String?) -> Bool {
-        capabilities(source: source, toolInputJSON: toolInputJSON).supportsAlways
+        guard feedSourceSupportsPersistentPermissionModes(source) else { return false }
+        guard source == "codex" else { return true }
+        return codexCapabilities(toolInputJSON: toolInputJSON).supportsAlways
     }
 
     static func feedSourceSupportsAllPermissionMode(_ source: String, toolInputJSON: String?) -> Bool {
-        capabilities(source: source, toolInputJSON: toolInputJSON).supportsAll
+        guard feedSourceSupportsPersistentPermissionModes(source) else { return false }
+        guard source == "codex" else { return true }
+        return codexCapabilities(toolInputJSON: toolInputJSON).supportsAll
     }
 
     static func feedSourceSupportsBypassPermissions(_ source: String) -> Bool {
-        capabilities(source: source, toolInputJSON: nil).supportsBypass
+        source != "codex" && source != "claude" && source != "hermes-agent"
     }
 
     static func requestIdString(_ requestId: Any) -> String {
@@ -472,13 +478,62 @@ enum CodexTeamsApprovalBridge {
         }
     }
 
-    private static func capabilities(
-        source: String,
-        toolInputJSON: String?
-    ) -> WorkstreamPermissionActionCapabilities {
-        WorkstreamPermissionActionPolicy().capabilities(
-            sourceWireName: source,
-            toolInputJSON: toolInputJSON
-        )
+    private static func codexCapabilities(toolInputJSON: String?) -> CodexPermissionCapabilities {
+        guard let toolInputJSON else {
+            return (supportsOnce: true, supportsAlways: true, supportsAll: true)
+        }
+        guard let data = toolInputJSON.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return (supportsOnce: false, supportsAlways: false, supportsAll: false)
+        }
+
+        let method = object["app_server_method"] as? String
+        let decisions = codexAvailableDecisions(in: object)
+        let acceptsOnce = decisions?.contains("accept") ?? true
+        let acceptsSession = decisions?.contains("acceptForSession") ?? true
+        switch method {
+        case "item/permissions/requestApproval":
+            return (supportsOnce: true, supportsAlways: true, supportsAll: true)
+        case "item/commandExecution/requestApproval":
+            return (
+                supportsOnce: acceptsOnce,
+                supportsAlways: acceptsSession,
+                supportsAll: codexSupportsAmendmentDecision(object: object, decisions: decisions)
+            )
+        case "item/fileChange/requestApproval":
+            return (
+                supportsOnce: acceptsOnce,
+                supportsAlways: acceptsSession,
+                supportsAll: false
+            )
+        default:
+            return (supportsOnce: acceptsOnce, supportsAlways: acceptsSession, supportsAll: false)
+        }
+    }
+
+    private static func codexSupportsAmendmentDecision(object: [String: Any], decisions: Set<String>?) -> Bool {
+        if let amendment = object["proposed_execpolicy_amendment"],
+           codexDecisionAvailableOrUnspecified("acceptWithExecpolicyAmendment", decisions: decisions),
+           !(amendment is NSNull) {
+            return true
+        }
+        if let amendments = object["proposed_network_policy_amendments"] as? [Any],
+           !amendments.isEmpty,
+           codexDecisionAvailableOrUnspecified("applyNetworkPolicyAmendment", decisions: decisions) {
+            return true
+        }
+        return false
+    }
+
+    private static func codexAvailableDecisions(in object: [String: Any]) -> Set<String>? {
+        guard let raw = object["available_decisions"] ?? object["availableDecisions"] else {
+            return nil
+        }
+        return Set(decisionNames(raw))
+    }
+
+    private static func codexDecisionAvailableOrUnspecified(_ decision: String, decisions: Set<String>?) -> Bool {
+        decisions?.contains(decision) ?? true
     }
 }

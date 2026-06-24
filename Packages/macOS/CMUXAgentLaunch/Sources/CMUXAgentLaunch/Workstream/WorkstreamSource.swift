@@ -7,17 +7,11 @@ import Foundation
 public enum WorkstreamSource: String, Codable, Sendable, CaseIterable, Equatable {
     case claude
     case codex
-    case grok
     case pi
-    case omp
     case amp
     case cursor
     case opencode
     case gemini
-    case kiro
-    /// Antigravity CLI (formerly Gemini CLI).
-    case antigravity
-    case rovodev
     case hermesAgent = "hermes-agent"
     case copilot
     case codebuddy

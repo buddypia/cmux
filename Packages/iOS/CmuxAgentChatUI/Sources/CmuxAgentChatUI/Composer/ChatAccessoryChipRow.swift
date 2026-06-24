@@ -6,7 +6,6 @@ import SwiftUI
 public struct ChatAccessoryChipRow: View {
     private let agentState: ChatAgentState
     private let onInterrupt: (Bool) -> Void
-    private let onSubmitForm: () -> Void
     private let onOpenTerminal: () -> Void
 
     /// Creates the chip row.
@@ -15,17 +14,14 @@ public struct ChatAccessoryChipRow: View {
     ///   - agentState: Live agent presence; working adds the Stop chip.
     ///   - onInterrupt: Interrupts the agent (`false` = Esc, `true` =
     ///     Ctrl-C).
-    ///   - onSubmitForm: Submits a completed in-terminal multi-step form.
     ///   - onOpenTerminal: Opens the session's raw terminal.
     public init(
         agentState: ChatAgentState,
         onInterrupt: @escaping (Bool) -> Void,
-        onSubmitForm: @escaping () -> Void = {},
         onOpenTerminal: @escaping () -> Void
     ) {
         self.agentState = agentState
         self.onInterrupt = onInterrupt
-        self.onSubmitForm = onSubmitForm
         self.onOpenTerminal = onOpenTerminal
     }
 
@@ -41,14 +37,6 @@ public struct ChatAccessoryChipRow: View {
                     ) {
                         onInterrupt(false)
                     }
-                }
-                if isNeedsInput {
-                    chip(
-                        label: String(
-                            localized: "chat.chip.submit", defaultValue: "Submit", bundle: .module
-                        ),
-                        action: onSubmitForm
-                    )
                 }
                 chip(
                     label: String(localized: "chat.chip.esc", defaultValue: "Esc", bundle: .module)
@@ -92,11 +80,6 @@ public struct ChatAccessoryChipRow: View {
 
     private var isWorking: Bool {
         if case .working = agentState { return true }
-        return false
-    }
-
-    private var isNeedsInput: Bool {
-        if case .needsInput = agentState { return true }
         return false
     }
 

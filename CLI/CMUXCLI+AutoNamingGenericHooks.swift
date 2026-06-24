@@ -1,10 +1,7 @@
 import Foundation
 
-import CmuxSettings
-
 extension CMUXCLI {
     enum AgentAutoNamingSource: Equatable {
-        case antigravityTranscript
         case codexRollout
         case grokHistory
         case hookMessageCache
@@ -12,8 +9,6 @@ extension CMUXCLI {
 
     func autoNamingSource(for def: AgentHookDef) -> AgentAutoNamingSource? {
         switch def.name {
-        case "antigravity":
-            return .antigravityTranscript
         case "codex":
             return .codexRollout
         case "grok":
@@ -87,17 +82,6 @@ extension CMUXCLI {
         let engine = AutoNamingEngine()
         let sourceResult: (messages: [AutoNamingTranscriptMessage], lineCount: Int)? = {
             switch source {
-            case .antigravityTranscript:
-                let transcriptPath = normalizedHookValue(optionValue(commandArgs, name: "--transcript"))
-                    ?? mapped?.transcriptPath
-                    ?? antigravityBrainTranscriptPath(sessionId: sessionId, env: env)
-                guard let transcriptPath,
-                      let lines = readRecentTextFileLines(path: transcriptPath, maxBytes: 512 * 1024),
-                      !lines.isEmpty else {
-                    return nil
-                }
-                let lineCount = textFileGrowthMetric(path: transcriptPath, fallbackLineCount: lines.count)
-                return (engine.extractAntigravityMessages(fromTranscriptLines: lines), lineCount)
             case .codexRollout:
                 return nil
             case .grokHistory:
@@ -131,10 +115,6 @@ extension CMUXCLI {
         let resolution = resolvedSummarizerAgent(
             probe: probe, sessionAgent: def.name, env: env, telemetry: telemetry
         )
-        guard AutoNamingAgentCatalog.summarizerSupported(slug: resolution.agent) else {
-            telemetry.breadcrumb("\(def.name)-hook.auto-name.unsupported-summarizer.\(resolution.agent)")
-            return
-        }
         runMessageBackedAutoName(
             sessionId: sessionId,
             workspaceId: workspaceId,
@@ -273,32 +253,6 @@ extension CMUXCLI {
         if confirmedTitle != nil, let missing = missingOverride {
             reportAutoNamingProblem("not_installed", agent: missing, workspaceId: workspaceId, client: client)
         }
-    }
-
-    func antigravityBrainTranscriptPath(
-        sessionId: String,
-        env: [String: String],
-        fileManager: FileManager = .default
-    ) -> String? {
-        let target = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !target.isEmpty else { return nil }
-        let home = ((normalizedHookValue(env["HOME"]) ?? NSHomeDirectory()) as NSString).expandingTildeInPath
-        let logs = URL(fileURLWithPath: home, isDirectory: true)
-            .appendingPathComponent(".gemini", isDirectory: true)
-            .appendingPathComponent("antigravity-cli", isDirectory: true)
-            .appendingPathComponent("brain", isDirectory: true)
-            .appendingPathComponent(target, isDirectory: true)
-            .appendingPathComponent(".system_generated", isDirectory: true)
-            .appendingPathComponent("logs", isDirectory: true)
-        for filename in ["transcript.jsonl", "transcript_full.jsonl"] {
-            let candidate = logs.appendingPathComponent(filename, isDirectory: false)
-            var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-               !isDirectory.boolValue {
-                return candidate.path
-            }
-        }
-        return nil
     }
 
     func applyAutoNamingTitle(

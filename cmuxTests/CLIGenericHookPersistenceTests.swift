@@ -1271,74 +1271,6 @@ extension CLINotifyProcessIntegrationRegressionTests {
         XCTAssertEqual(waitTimeout.doubleValue, 0)
     }
 
-    func testAntigravityRunShellCommandFeedContextIncludesCommandSummary() throws {
-        let cliPath = try bundledCLIPath()
-        let socketPath = makeSocketPath("antigravity-run-shell-context")
-        let listenerFD = try bindUnixSocket(at: socketPath)
-        let state = MockSocketServerState()
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-antigravity-run-shell-context-\(UUID().uuidString)", isDirectory: true)
-        let workspaceId = "33333333-3333-3333-3333-333333333333"
-        let surfaceId = "44444444-4444-4444-4444-444444444444"
-
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer {
-            Darwin.close(listenerFD)
-            unlink(socketPath)
-            try? FileManager.default.removeItem(at: root)
-        }
-
-        let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-            guard let payload = self.jsonObject(line) else {
-                return self.malformedRequestResponse(raw: line)
-            }
-            guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
-                return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
-            }
-            XCTAssertEqual(method, "feed.push")
-            return self.v2Response(id: id, ok: true, result: ["status": "acknowledged"])
-        }
-
-        let result = runProcess(
-            executablePath: cliPath,
-            arguments: ["hooks", "feed", "--source", "antigravity", "--event", "PreToolUse"],
-            environment: [
-                "HOME": root.path,
-                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                "PWD": root.path,
-                "CMUX_SOCKET_PATH": socketPath,
-                "CMUX_WORKSPACE_ID": workspaceId,
-                "CMUX_SURFACE_ID": surfaceId,
-                "CMUX_ANTIGRAVITY_PID": "424242",
-                "CMUX_CLI_SENTRY_DISABLED": "1",
-            ],
-            standardInput: #"{"hook_event_name":"PreToolUse","session_id":"agy-shell-session","cwd":"\#(root.path)","toolCall":{"name":"run_shell_command","args":{"command":"swift test --filter FeedEventClassificationTests"}}}"#,
-            timeout: 5
-        )
-        wait(for: [serverHandled], timeout: 5)
-
-        XCTAssertFalse(result.timedOut, result.stderr)
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertEqual(result.stdout, "{}\n")
-
-        let feedEvents = state.commands.compactMap { command -> [String: Any]? in
-            guard let payload = self.jsonObject(command),
-                  payload["method"] as? String == "feed.push",
-                  let params = payload["params"] as? [String: Any],
-                  let event = params["event"] as? [String: Any] else {
-                return nil
-            }
-            return event
-        }
-        XCTAssertEqual(feedEvents.count, 1, "Expected one Antigravity Feed event, saw \(state.commands)")
-        let event = try XCTUnwrap(feedEvents.first)
-        XCTAssertEqual(event["hook_event_name"] as? String, "PermissionRequest")
-        XCTAssertEqual(event["_source"] as? String, "antigravity")
-        XCTAssertEqual(event["tool_name"] as? String, "run_shell_command")
-        let context = try XCTUnwrap(event["context"] as? [String: Any])
-        XCTAssertEqual(context["toolSummary"] as? String, "swift test --filter FeedEventClassificationTests")
-    }
-
     func testAntigravityFeedHookMissingSessionIdUsesStableFallback() throws {
         let cliPath = try bundledCLIPath()
         let socketPath = makeSocketPath("antigravity-feed-stable-session")
@@ -3344,7 +3276,7 @@ extension CLINotifyProcessIntegrationRegressionTests {
             XCTAssertEqual(params["auto_resume"] as? Bool, true)
             XCTAssertEqual(
                 params["command"] as? String,
-                "cd '\(workspace.path)' && '\(scenario.executable)' 'chat' '--resume-id' '\(scenario.sessionId)' '--agent' 'cmux' '--trust-tools' 'fs_read,fs_write'"
+                "{ cd -- '\(workspace.path)' 2>/dev/null || [ ! -d '\(workspace.path)' ]; } && '\(scenario.executable)' 'chat' '--resume-id' '\(scenario.sessionId)' '--agent' 'cmux' '--trust-tools' 'fs_read,fs_write'"
             )
             XCTAssertEqual(params["environment"] as? [String: String], scenario.expectedEnvironment)
             XCTAssertFalse(

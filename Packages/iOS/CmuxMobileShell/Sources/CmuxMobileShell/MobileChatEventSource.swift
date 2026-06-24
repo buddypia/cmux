@@ -206,15 +206,4 @@ public actor MobileChatEventSource: ChatEventSource {
         )
         _ = try await client.sendRequest(request)
     }
-
-    public func submit(sessionID: String) async throws {
-        let request = try MobileCoreRPCClient.requestData(
-            method: "mobile.chat.answer",
-            params: [
-                "session_id": sessionID,
-                "action": "submit",
-            ]
-        )
-        _ = try await client.sendRequest(request)
-    }
 }

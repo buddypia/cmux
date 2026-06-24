@@ -14,8 +14,6 @@ public struct ChatStatusTransition: Sendable, Equatable, Codable {
         case interrupted
         /// The agent compacted its context window.
         case contextCompacted = "context_compacted"
-        /// The agent thread was rolled back to an earlier turn.
-        case threadRolledBack = "thread_rolled_back"
     }
 
     /// The transition that occurred.

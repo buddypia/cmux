@@ -215,9 +215,6 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
     /// stable; its default on-bar position is curated separately in
     /// ``defaultConfigurableOrder``.
     case returnKey
-    /// Launch Antigravity from the mobile terminal. Appended at the end so
-    /// existing persisted raw values (`builtin.<n>`) stay stable.
-    case antigravity
     var title: String {
         title(isMacRemote: false)
     }
@@ -264,8 +261,6 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
             return "Claude"
         case .codex:
             return "Codex"
-        case .antigravity:
-            return "Antigravity"
         case .home:
             return String(localized: "terminal.input_accessory.title.home", defaultValue: "Home")
         case .end:
@@ -307,7 +302,6 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
         case .rightArrow: return "terminal.inputAccessory.right"
         case .claude: return "terminal.inputAccessory.claude"
         case .codex: return "terminal.inputAccessory.codex"
-        case .antigravity: return "terminal.inputAccessory.antigravity"
         case .tilde: return "terminal.inputAccessory.tilde"
         case .pipe: return "terminal.inputAccessory.pipe"
         case .dollar: return "terminal.inputAccessory.dollar"
@@ -414,8 +408,6 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
             return Data("claude --dangerously-skip-permissions\r".utf8)
         case .codex:
             return Data("codex --dangerously-bypass-approvals-and-sandbox -c model_reasoning_effort=xhigh --search\r".utf8)
-        case .antigravity:
-            return Data("agy --dangerously-skip-permissions\r".utf8)
         case .home:
             return Data([0x1B, 0x5B, 0x48]) // ESC[H
         case .end:
@@ -468,7 +460,7 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
 
     /// The default on-bar arrangement of the configurable shortcuts: the leading
     /// modifier/paste controls, then the high-traffic agent and control keys (Tab,
-    /// Esc, Return, ^C/^D, the agent launchers, the arrow keys, Clear), then
+    /// Esc, Return, ^C/^D, the Claude/Codex launchers, the arrow keys, Clear), then
     /// the punctuation and navigation keys, then the trailing zoom controls. Esc and
     /// Return sit immediately to the right of Tab so the most common terminal keys
     /// are adjacent. Curated independently of the enum's `rawValue` order so the
@@ -484,7 +476,7 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
             .escape,
             .returnKey,
             .ctrlC, .ctrlD,
-            .claude, .codex, .antigravity,
+            .claude, .codex,
             .upArrow, .downArrow, .leftArrow, .rightArrow,
             .ctrlL,
             .tilde, .dollar, .slash, .atSign, .pipe,
@@ -506,7 +498,6 @@ public enum TerminalInputAccessoryAction: Int, CaseIterable, Sendable {
         case .rightArrow: return String(localized: "terminal.shortcut.name.rightArrow", defaultValue: "Right Arrow")
         case .claude: return String(localized: "terminal.shortcut.name.claude", defaultValue: "Claude")
         case .codex: return String(localized: "terminal.shortcut.name.codex", defaultValue: "Codex")
-        case .antigravity: return String(localized: "terminal.shortcut.name.antigravity", defaultValue: "Antigravity")
         case .tilde: return String(localized: "terminal.shortcut.name.tilde", defaultValue: "Tilde ~")
         case .pipe: return String(localized: "terminal.shortcut.name.pipe", defaultValue: "Pipe |")
         case .dollar: return String(localized: "terminal.shortcut.name.dollar", defaultValue: "Dollar $")
@@ -2002,6 +1993,17 @@ public final class GhosttySurfaceView: UIView, TerminalSurfaceHosting {
         needsDraw = true
         zoomSettleFrames = Self.zoomSettleFrameThreshold
         return true
+    }
+
+    /// Drive the live terminal font to an absolute point size from outside the
+    /// surface (the Mac-pushed `terminal.set_font` event, routed through the
+    /// representable's coordinator). Funnels through the same shared
+    /// ``applyAbsoluteFontSize(_:)`` apply path as a pinch step or the
+    /// zoom-control overlay, so there is one clamp + reflow path, then refreshes
+    /// the zoom HUD so the on-screen size tracks the remote change.
+    public func setLiveFontSize(_ points: Float32) {
+        applyAbsoluteFontSize(points)
+        zoomOverlay?.updateZoom(points: pendingFontSize ?? liveFontSize)
     }
 
     /// Set the live zoom to an absolute size (clamped to the font range),

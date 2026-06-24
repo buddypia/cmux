@@ -3,7 +3,7 @@ import Foundation
 extension AgentChatTranscriptService {
     func scheduleTitleDetectedAdoption(_ change: GhosttyTitleChange) {
         let surfaceID = change.surfaceId.uuidString
-        guard let titleKey = Self.agentTitleDetectionKey(change.title) else {
+        guard let titleKey = Self.claudeTitleDetectionKey(change.title) else {
             clearTitleDetectionState(surfaceID: surfaceID)
             return
         }

@@ -72,13 +72,6 @@ struct ChatMessageCodableTests {
                     selectedOptionLabel: "Safe"
                 )
             ),
-            .question(
-                ChatQuestion(
-                    prompt: "Continue?",
-                    options: [ChatQuestion.Option(label: "Yes")],
-                    resolution: .expired
-                )
-            ),
             .status(ChatStatusTransition(event: .sessionStarted, detail: "claude")),
             .attachment(ChatAttachment(media: .image, displayName: "design.png", hostPath: "/tmp/design.png")),
         ]
@@ -164,25 +157,5 @@ struct ChatMessageCodableTests {
             let decoded = try decoder.decode(ChatAgentState.self, from: encoder.encode(state))
             #expect(decoded == state)
         }
-    }
-
-    @Test("Antigravity is a first-class chat agent kind")
-    func antigravityKind() throws {
-        let kind = ChatAgentKind(source: "antigravity")
-        #expect(kind == .antigravity)
-        #expect(kind.sourceName == "antigravity")
-        #expect(kind.displayName == "Antigravity")
-
-        let encoded = try JSONEncoder().encode(kind)
-        let decoded = try JSONDecoder().decode(ChatAgentKind.self, from: encoded)
-        #expect(decoded == .antigravity)
-    }
-
-    @Test("Antigravity chat agent kind accepts legacy source aliases")
-    func antigravityAliases() {
-        #expect(ChatAgentKind(source: "agy") == .antigravity)
-        #expect(ChatAgentKind(source: "gemini") == .antigravity)
-        #expect(ChatAgentKind(source: "gemini-cli") == .antigravity)
-        #expect(ChatAgentKind(source: "antigravity-cli") == .antigravity)
     }
 }

@@ -102,7 +102,7 @@ public struct ClaudeTranscriptParser: Sendable {
                     seq: seq, timestamp: timestamp, into: &assembler
                 )
             case "tool_result":
-                resolveToolResult(block, timestamp: timestamp, into: &assembler)
+                resolveToolResult(block, into: &assembler)
             default:
                 continue
             }
@@ -134,7 +134,6 @@ public struct ClaudeTranscriptParser: Sendable {
 
     private func resolveToolResult(
         _ block: TranscriptJSONValue,
-        timestamp: Date,
         into assembler: inout TranscriptBatchAssembler
     ) {
         guard let callID = block["tool_use_id"]?.string else { return }
@@ -145,8 +144,7 @@ public struct ClaudeTranscriptParser: Sendable {
             completion: TranscriptToolCompletion(
                 output: output,
                 isError: isError,
-                exitCode: parsedExitCode(from: output),
-                timestamp: timestamp
+                exitCode: parsedExitCode(from: output)
             )
         )
     }
@@ -268,7 +266,7 @@ public struct ClaudeTranscriptParser: Sendable {
         let callID = block["id"]?.string
         let input = block["input"]
         let kinds = toolUseKinds(toolName: toolName, input: input)
-        for kind in kinds {
+        for (index, kind) in kinds.enumerated() {
             let message = ChatMessage(
                 id: blockID(lineID: lineID, emitted: emitted),
                 seq: seq,

@@ -54,8 +54,6 @@ private actor FailingChatEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
-
-    func submit(sessionID: String) async throws {}
 }
 
 /// A `ChatEventSource` whose `send` suspends until released, so tests can
@@ -86,8 +84,6 @@ private actor GatedChatEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
-
-    func submit(sessionID: String) async throws {}
 }
 
 /// A `ChatEventSource` whose `send` succeeds without echoing, with a
@@ -121,35 +117,6 @@ private actor SilentSendEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
-
-    func submit(sessionID: String) async throws {}
-}
-
-/// A `ChatEventSource` that records current-form submit actions.
-private actor RecordingSubmitEventSource: ChatEventSource {
-    private var submittedSessions: [String] = []
-
-    func history(sessionID: String, beforeSeq: Int?, limit: Int) async throws -> ChatHistoryPage {
-        ChatHistoryPage(messages: [], hasMore: false)
-    }
-
-    func events(sessionID: String) async -> AsyncStream<ChatSessionEvent> {
-        AsyncStream { $0.finish() }
-    }
-
-    func send(text: String, attachments: [ChatOutboundAttachment], sessionID: String) async throws {}
-
-    func interrupt(sessionID: String, hard: Bool) async throws {}
-
-    func answer(optionIndex: Int, sessionID: String) async throws {}
-
-    func submit(sessionID: String) async throws {
-        submittedSessions.append(sessionID)
-    }
-
-    func submissions() -> [String] {
-        submittedSessions
-    }
 }
 
 /// A `ChatEventSource` modeling the Mac tailer's bounded cache: the
@@ -179,8 +146,6 @@ private actor TruncatedHeadEventSource: ChatEventSource {
     func interrupt(sessionID: String, hard: Bool) async throws {}
 
     func answer(optionIndex: Int, sessionID: String) async throws {}
-
-    func submit(sessionID: String) async throws {}
 }
 
 @Suite("ChatConversationStore")
@@ -419,17 +384,6 @@ struct ChatConversationStoreTests {
         #expect(store.lastErrorDescription == nil)
     }
 
-    @Test("submitCurrentForm routes to the event source")
-    func submitCurrentFormRoutesToSource() async {
-        let source = RecordingSubmitEventSource()
-        let store = Self.makeStore(source: source)
-
-        await store.submitCurrentForm()
-
-        #expect(await source.submissions() == ["session-1"])
-        #expect(store.lastErrorDescription == nil)
-    }
-
     @Test("retry while the agent is working re-queues instead of delivering")
     func retryWhileWorkingRequeues() async {
         let source = SilentSendEventSource()
@@ -640,7 +594,7 @@ struct ChatConversationStoreTests {
         })
         await source.setSendFailure(false)
         await store.send(text: "second\ndelivered send")
-        _ = await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 2 }
+        #expect(await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 2 })
 
         let echo = ChatMessage(
             id: "echo-ph",
@@ -650,7 +604,7 @@ struct ChatConversationStoreTests {
             kind: .prose(ChatProse(text: "[Pasted text #1 +2 lines]"))
         )
         await source.emit(.appended([echo]))
-        _ = await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 1 }
+        #expect(await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 1 })
         // One non-failed pending was consumed; the failed row remains.
         let remaining = Self.pendingItems(store.rows)
         #expect(remaining.count == 1)
@@ -670,7 +624,7 @@ struct ChatConversationStoreTests {
         let attachment = ChatOutboundAttachment(data: Data([0x89]), format: .png)
         await store.send(text: "", attachments: [attachment])
         await store.send(text: "/compact")
-        _ = await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 2 }
+        #expect(await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 2 })
 
         let slashEcho = ChatMessage(
             id: "echo-slash",
@@ -680,7 +634,7 @@ struct ChatConversationStoreTests {
             kind: .prose(ChatProse(text: "/compact"))
         )
         await source.emit(.appended([slashEcho]))
-        _ = await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 1 }
+        #expect(await TestPoller.waitUntil { Self.pendingItems(store.rows).count == 1 })
         // The exact-text match consumed "/compact"; the attachment-only
         // pending survives until its clipboard-path echo arrives.
         #expect(Self.pendingItems(store.rows).first?.text.isEmpty == true)
