@@ -1713,6 +1713,13 @@ final class MenuBarBuildHintFormatterTests: XCTestCase {
         )
     }
 
+    func testBuddypiaDebugBuildWithTagShowsTag() {
+        XCTAssertEqual(
+            MenuBarBuildHintFormatter.menuTitle(appName: "Buddypia cmux DEV menubar-extra", isDebugBuild: true),
+            "Build Tag: menubar-extra"
+        )
+    }
+
     func testDebugBuildWithoutTagShowsUntagged() {
         XCTAssertEqual(
             MenuBarBuildHintFormatter.menuTitle(appName: "cmux DEV", isDebugBuild: true),
