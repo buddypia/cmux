@@ -1853,6 +1853,8 @@ class TerminalController {
         // App focus (app.focus_override.set/app.simulate_active) handled by ControlCommandCoordinator.
 
         // Browser
+        case "agentStudio.open":
+            return v2Result(id: id, self.v2AgentStudioOpen(params: params))
         case "browser.open_split":
             return v2Result(id: id, self.v2BrowserOpenSplit(params: params))
         // Browser automation methods that can wait on page JavaScript, WebKit
@@ -2087,6 +2089,7 @@ class TerminalController {
             "app.simulate_active",
             "file.open",
             "markdown.open",
+            "agentStudio.open",
             "browser.open_split",
             "browser.navigate",
             "browser.back",
@@ -6047,6 +6050,11 @@ class TerminalController {
             url = nil
         }
         let respectExternalOpenRules = v2Bool(params, "respect_external_open_rules") ?? false
+        let reloadIgnoringCache = v2Bool(params, "reload_ignoring_cache") ?? false
+        let initialRequest: URLRequest? = {
+            guard reloadIgnoringCache, let url else { return nil }
+            return URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        }()
 
         if BrowserAvailabilitySettings.isDisabled() {
             if v2IsDiffViewerURL(url) {
@@ -6118,6 +6126,7 @@ class TerminalController {
                 createdPanel = ws.newBrowserSurface(
                     inPane: targetPane,
                     url: url,
+                    initialRequest: initialRequest,
                     focus: focus,
                     selectWhenNotFocused: true,
                     creationPolicy: .automationPreload,
@@ -6132,6 +6141,7 @@ class TerminalController {
                     from: sourceSurfaceId,
                     orientation: .horizontal,
                     url: url,
+                    initialRequest: initialRequest,
                     focus: focus,
                     creationPolicy: .automationPreload,
                     omnibarVisible: omnibarVisible,
@@ -6170,6 +6180,15 @@ class TerminalController {
             ])
         }
         return result
+    }
+
+    private func v2AgentStudioOpen(params: [String: Any]) -> V2CallResult {
+        var adjustedParams = params
+        adjustedParams["reload_ignoring_cache"] = true
+        if adjustedParams["respect_external_open_rules"] == nil {
+            adjustedParams["respect_external_open_rules"] = false
+        }
+        return v2BrowserOpenSplit(params: adjustedParams)
     }
 
     private func v2IsDiffViewerURL(_ url: URL?) -> Bool {

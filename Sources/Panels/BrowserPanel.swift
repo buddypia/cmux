@@ -754,10 +754,10 @@ func browserShouldPersistInsecureHTTPAllowlistSelection(
 }
 
 func browserPreparedNavigationRequest(_ request: URLRequest) -> URLRequest {
-    var preparedRequest = request
-    // Match browser behavior for ordinary loads while preserving method/body/headers.
-    preparedRequest.cachePolicy = .useProtocolCachePolicy
-    return preparedRequest
+    // URLRequest(url:) already defaults to .useProtocolCachePolicy for ordinary loads.
+    // Preserve explicit policies such as .reloadIgnoringLocalCacheData for callers that
+    // need to bypass stale WebKit cache without losing method/body/headers.
+    request
 }
 
 /// Carries the request and one-shot HTTP bypass needed to seed a retargeted tab.
