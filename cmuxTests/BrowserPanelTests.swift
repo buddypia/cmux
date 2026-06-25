@@ -599,6 +599,21 @@ final class BrowserPanelFileSystemAccessBridgeTests: XCTestCase {
 
 @MainActor
 final class BrowserPanelInitialNavigationTests: XCTestCase {
+    func testPreparedNavigationRequestPreservesExplicitCachePolicy() throws {
+        let url = try XCTUnwrap(URL(string: "https://localhost:4321/workspace"))
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpMethod = "POST"
+        request.httpBody = Data("payload".utf8)
+        request.setValue("agent-studio", forHTTPHeaderField: "X-Test-Client")
+
+        let prepared = browserPreparedNavigationRequest(request)
+
+        XCTAssertEqual(prepared.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(prepared.httpMethod, "POST")
+        XCTAssertEqual(prepared.httpBody, Data("payload".utf8))
+        XCTAssertEqual(prepared.value(forHTTPHeaderField: "X-Test-Client"), "agent-studio")
+    }
+
     func testInitialURLCanBePreservedWithoutRenderingWebView() throws {
         let url = try XCTUnwrap(URL(string: "https://example.com/custom-layout"))
         let panel = BrowserPanel(
