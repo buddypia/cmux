@@ -173866,6 +173866,23 @@
         }
       }
     },
+    "cli.pathOpen.error.defaultAppOpenFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed to open %@ in the default app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ をデフォルトアプリで開けませんでした"
+          }
+        }
+      }
+    },
     "cli.pathOpen.error.pathDoesNotExist": {
       "extractionState": "manual",
       "localizations": {

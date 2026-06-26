@@ -21,50 +21,69 @@ final class CMUXOpenHTMLFocusTests {
         }
     }
 
-    @Test func testOpenCommandRoutesLocalHTMLToBackgroundBrowserSplit() throws {
+    @Test func testOpenCommandRoutesLocalHTMLToDefaultBrowser() throws {
         let cliPath = try bundledCLIPath()
         let socketPath = makeSocketPath("open-html")
-        let listenerFD = try bindUnixSocket(at: socketPath)
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let htmlURL = rootURL.appendingPathComponent("gallery.html")
+        let fakeOpenURL = rootURL.appendingPathComponent("open", isDirectory: false)
+        let openLogURL = rootURL.appendingPathComponent("open-args.txt", isDirectory: false)
+        let openEnvLogURL = rootURL.appendingPathComponent("open-env.txt", isDirectory: false)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try "<!doctype html><title>Gallery</title>\n".write(to: htmlURL, atomically: true, encoding: .utf8)
-        let state = MockSocketServerState()
+        try fakeOpenScript().write(to: fakeOpenURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeOpenURL.path)
 
         defer {
-            Darwin.close(listenerFD)
             unlink(socketPath)
             try? FileManager.default.removeItem(at: rootURL)
         }
 
-        let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-            guard let payload = Self.v2Payload(from: line),
-                  let id = payload["id"] as? String,
-                  let method = payload["method"] as? String else {
-                return Self.v2Response(id: "unknown", ok: false, error: ["code": "unexpected"])
-            }
+        let result = runCLI(
+            cliPath: cliPath,
+            socketPath: socketPath,
+            arguments: ["open", htmlURL.path],
+            environmentOverrides: [
+                "CMUX_SOCKET": socketPath,
+                "CMUX_SOCKET_PASSWORD": "stale-password",
+                "CMUX_SOCKET_ENABLE": "0",
+                "CMUX_SOCKET_MODE": "off",
+                "CMUX_ALLOW_SOCKET_OVERRIDE": "1",
+                "CMUX_WORKSPACE_ID": "workspace:stale",
+                "CMUX_PANEL_ID": "panel:stale",
+                "CMUX_SURFACE_ID": "surface:stale",
+                "CMUX_TAB_ID": "tab:stale",
+                "CMUX_TEST_OPEN_TOOL_PATH": fakeOpenURL.path,
+                "CMUX_TEST_OPEN_LOG": openLogURL.path,
+                "CMUX_TEST_OPEN_ENV_LOG": openEnvLogURL.path
+            ]
+        )
 
-            let params = payload["params"] as? [String: Any] ?? [:]
-            guard method == "browser.open_split",
-                  params["url"] as? String == htmlURL.absoluteString,
-                  params["focus"] as? Bool == false else {
-                return Self.v2Response(id: id, ok: false, error: ["code": "unexpected", "message": method])
-            }
-            return Self.v2Response(
-                id: id,
-                ok: true,
-                result: ["surface_id": "surface-id", "pane_id": "pane-id", "created_split": true]
-            )
-        }
-
-        let result = runCLI(cliPath: cliPath, socketPath: socketPath, arguments: ["open", htmlURL.path])
-
-        #expect(serverHandled.wait(timeout: .now() + 5) == .success)
         #expect(!result.timedOut, Comment(rawValue: result.stderr))
         #expect(result.status == 0, Comment(rawValue: result.stderr))
         #expect(result.stdout == "OK urls=1\n")
-        #expect(state.commands.compactMap { Self.v2Payload(from: $0)?["method"] as? String } == ["browser.open_split"])
+        let openArguments = try readFakeOpenArguments(from: openLogURL)
+        #expect(openArguments == [htmlURL.standardizedFileURL.path])
+
+        let openEnvironment = try readFakeOpenEnvironment(from: openEnvLogURL)
+        for strippedKey in [
+            "CMUX_ALLOW_SOCKET_OVERRIDE",
+            "CMUX_SOCKET",
+            "CMUX_SOCKET_ENABLE",
+            "CMUX_SOCKET_MODE",
+            "CMUX_SOCKET_PASSWORD",
+            "CMUX_SOCKET_PATH",
+            "CMUX_PANEL_ID",
+            "CMUX_SURFACE_ID",
+            "CMUX_TAB_ID",
+            "CMUX_WORKSPACE_ID",
+        ] {
+            #expect(
+                !openEnvironment.contains { $0.hasPrefix("\(strippedKey)=") },
+                Comment(rawValue: "\(strippedKey) leaked to LaunchServices open environment: \(openEnvironment)")
+            )
+        }
     }
 
     @Test func testOpenCommandDoesNotInheritCallerSurfaceForExplicitWorkspace() throws {
@@ -213,6 +232,39 @@ final class CMUXOpenHTMLFocusTests {
         return URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("cli-\(name.prefix(6))-\(shortID).sock")
             .path
+    }
+
+    private func fakeOpenScript() -> String {
+        """
+        #!/bin/sh
+        : "${CMUX_TEST_OPEN_LOG:?}"
+        : > "$CMUX_TEST_OPEN_LOG"
+        printf 'fake open stdout should be suppressed\\n'
+        printf 'fake open stderr should be suppressed\\n' >&2
+        if [ -n "${CMUX_TEST_OPEN_ENV_LOG:-}" ]; then
+          env | LC_ALL=C sort | grep '^CMUX_' > "$CMUX_TEST_OPEN_ENV_LOG" || :
+        fi
+        for arg in "$@"; do
+          printf '%s\\n' "$arg" >> "$CMUX_TEST_OPEN_LOG"
+        done
+        exit 0
+        """
+    }
+
+    private func readFakeOpenArguments(from url: URL) throws -> [String] {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        return Array(contents
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .dropLast())
+    }
+
+    private func readFakeOpenEnvironment(from url: URL) throws -> [String] {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        return Array(contents
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .dropLast())
     }
 
     private func startMockServer(
