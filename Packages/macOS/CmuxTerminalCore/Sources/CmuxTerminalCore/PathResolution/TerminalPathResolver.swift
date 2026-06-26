@@ -14,8 +14,21 @@ public import Foundation
 /// file-existence capability is injected at init. Production uses the real
 /// file system; tests inject a fake probe. This mirrors
 /// ``TerminalLinkRouter``'s injected `BrowserHostNormalizing` seam.
+public struct TerminalVisibleTokenResolution: Equatable, Sendable {
+    public let rawToken: String
+    public let startRow: Int
+    public let endRow: Int
+}
+
 public struct TerminalPathResolver: Sendable {
     private let fileExists: @Sendable (String) -> Bool
+
+    private struct WrappedVisibleLine {
+        let text: String
+        let column: Int
+        let startRow: Int
+        let endRow: Int
+    }
 
     /// Creates a resolver that probes candidate paths through `fileExists`.
     ///
@@ -90,6 +103,61 @@ public struct TerminalPathResolver: Sendable {
         return nil
     }
 
+    /// Returns token candidates around a visible terminal cell, expanding
+    /// across adjacent soft-wrapped rows when the previous row fills the
+    /// terminal width.
+    ///
+    /// Ghostty can report wrapped links one visual row at a time. This helper
+    /// reconstructs the token from the visible viewport before URL/path routing
+    /// so a click on either visual row sees the whole link.
+    ///
+    /// - Parameters:
+    ///   - lines: Visible terminal rows, top to bottom.
+    ///   - row: The zero-based visible row under the cursor.
+    ///   - column: The zero-based terminal column under the cursor.
+    ///   - columns: The terminal viewport width in columns.
+    /// - Returns: Token candidates around the adjusted column.
+    public func visibleWrappedTokenCandidates(
+        _ lines: [String],
+        row: Int,
+        column: Int,
+        columns: Int
+    ) -> [TerminalVisibleTokenResolution] {
+        guard let wrapped = Self.wrappedVisibleLine(
+            lines,
+            row: row,
+            column: column,
+            columns: columns
+        ) else {
+            return []
+        }
+
+        return wrapped.text.pathTokenCandidates(containingColumn: wrapped.column).map {
+            TerminalVisibleTokenResolution(
+                rawToken: $0,
+                startRow: wrapped.startRow,
+                endRow: wrapped.endRow
+            )
+        }
+    }
+
+    /// Resolves a file path under a visible terminal cell, including paths
+    /// split across soft-wrapped visual rows.
+    public func resolveVisibleWrappedLinePath(
+        _ lines: [String],
+        row: Int,
+        column: Int,
+        columns: Int,
+        cwd: String
+    ) -> (rawToken: String, path: String)? {
+        for token in visibleWrappedTokenCandidates(lines, row: row, column: column, columns: columns) {
+            if let resolvedPath = resolveQuicklookPath(token.rawToken, cwd: cwd) {
+                return (token.rawToken, resolvedPath)
+            }
+        }
+        return nil
+    }
+
     /// Resolves an open-URL request payload to an existing file path.
     ///
     /// Text that parses as a URL with a scheme is never treated as a file
@@ -104,5 +172,58 @@ public struct TerminalPathResolver: Sendable {
         guard !trimmed.isEmpty else { return nil }
         guard URL(string: trimmed)?.scheme == nil else { return nil }
         return resolveQuicklookPath(trimmed, cwd: cwd)
+    }
+
+    private static func wrappedVisibleLine(
+        _ lines: [String],
+        row: Int,
+        column: Int,
+        columns: Int
+    ) -> WrappedVisibleLine? {
+        guard row >= 0, row < lines.count else { return nil }
+        let currentLine = lines[row]
+        guard !currentLine.isEmpty, column >= 0, column < currentLine.count else {
+            return nil
+        }
+
+        let terminalColumns = max(columns, 1)
+        var startRow = row
+        while startRow > 0,
+              softWraps(from: lines[startRow - 1], to: lines[startRow], columns: terminalColumns) {
+            startRow -= 1
+        }
+
+        var endRow = row
+        while endRow + 1 < lines.count,
+              softWraps(from: lines[endRow], to: lines[endRow + 1], columns: terminalColumns) {
+            endRow += 1
+        }
+
+        var adjustedColumn = column
+        if startRow < row {
+            adjustedColumn += lines[startRow..<row].reduce(0) { $0 + $1.count }
+        }
+
+        return WrappedVisibleLine(
+            text: lines[startRow...endRow].joined(),
+            column: adjustedColumn,
+            startRow: startRow,
+            endRow: endRow
+        )
+    }
+
+    private static func softWraps(from previous: String, to next: String, columns: Int) -> Bool {
+        guard previous.count >= columns,
+              let previousLast = previous.last,
+              let nextFirst = next.first else {
+            return false
+        }
+        if previousLast.isWhitespace {
+            return false
+        }
+        if nextFirst.isWhitespace, previousLast != "\\" {
+            return false
+        }
+        return true
     }
 }

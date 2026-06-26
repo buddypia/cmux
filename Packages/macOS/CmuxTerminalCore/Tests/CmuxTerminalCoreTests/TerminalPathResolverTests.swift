@@ -229,6 +229,76 @@ private func existsIn(_ existingPaths: Set<String>) -> @Sendable (String) -> Boo
         #expect(resolution.path == existingFile)
     }
 
+    @Test func resolvesPathAcrossSoftWrappedVisibleRowsFromContinuationRow() throws {
+        let cwd = "/Users/dev/project"
+        let existingFile = "\(cwd)/docs/super-long-link-target.md"
+        let firstRow = "open docs/super-long-"
+        let secondRow = "link-target.md now"
+        let resolution = try #require(
+            TerminalPathResolver(fileExists: existsIn([existingFile])).resolveVisibleWrappedLinePath(
+                [firstRow, secondRow],
+                row: 1,
+                column: 2,
+                columns: firstRow.count,
+                cwd: cwd
+            )
+        )
+        #expect(resolution.path == existingFile)
+        #expect(resolution.rawToken == "docs/super-long-link-target.md")
+    }
+
+    @Test func resolvesPathAcrossSoftWrappedVisibleRowsFromFirstRow() throws {
+        let cwd = "/Users/dev/project"
+        let existingFile = "\(cwd)/docs/super-long-link-target.md"
+        let firstRow = "open docs/super-long-"
+        let secondRow = "link-target.md now"
+        let resolution = try #require(
+            TerminalPathResolver(fileExists: existsIn([existingFile])).resolveVisibleWrappedLinePath(
+                [firstRow, secondRow],
+                row: 0,
+                column: 10,
+                columns: firstRow.count,
+                cwd: cwd
+            )
+        )
+        #expect(resolution.path == existingFile)
+        #expect(resolution.rawToken == "docs/super-long-link-target.md")
+    }
+
+    @Test func visibleWrappedTokenCandidatesJoinURLsAcrossRows() throws {
+        let firstRow = "visit https://example.com/deep/"
+        let secondRow = "path?x=1 for details"
+        let tokens = TerminalPathResolver().visibleWrappedTokenCandidates(
+            [firstRow, secondRow],
+            row: 1,
+            column: 2,
+            columns: firstRow.count
+        )
+        let token = try #require(
+            tokens.first { $0.rawToken == "https://example.com/deep/path?x=1" }
+        )
+        #expect(token.rawToken == "https://example.com/deep/path?x=1")
+        #expect(token.startRow == 0)
+        #expect(token.endRow == 1)
+    }
+
+    @Test func visibleWrappedTokenCandidatesDoNotJoinWhenPreviousRowIsNotFullWidth() throws {
+        let firstRow = "visit https://example.com/deep/"
+        let secondRow = "path?x=1 for details"
+        let tokens = TerminalPathResolver().visibleWrappedTokenCandidates(
+            [firstRow, secondRow],
+            row: 1,
+            column: 2,
+            columns: firstRow.count + 1
+        )
+        let token = try #require(
+            tokens.first { $0.rawToken == "path?x=1" }
+        )
+        #expect(token.rawToken == "path?x=1")
+        #expect(token.startRow == 1)
+        #expect(token.endRow == 1)
+    }
+
     @Test func returnsNilWhenColumnSitsOnHardDelimiter() {
         #expect(
             TerminalPathResolver(fileExists: { _ in true }).resolveVisibleLinePath(

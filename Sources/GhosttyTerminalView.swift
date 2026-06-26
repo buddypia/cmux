@@ -3040,8 +3040,19 @@ class GhosttyApp {
             // (with trailing-punctuation trimming via TerminalPathResolver's quicklook resolution).
             // If the file exists and cmux can handle it, route through the
             // file viewer instead of the browser.
-            let trimmedUrlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-            var normalizedOpenURLString = urlString
+            let rawTrimmedUrlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let expandedOpenURLString = rawTrimmedUrlString.isEmpty
+                ? urlString
+                : performOnMain {
+                    surfaceView.expandedTerminalOpenURLText(rawText: rawTrimmedUrlString)
+                }
+            #if DEBUG
+            if expandedOpenURLString != rawTrimmedUrlString {
+                cmuxDebugLog("link.openURL expanded=\(expandedOpenURLString)")
+            }
+            #endif
+            let trimmedUrlString = expandedOpenURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            var normalizedOpenURLString = expandedOpenURLString
             if !trimmedUrlString.isEmpty {
                 let filePathResolution: (routed: Bool, fallbackPath: String?) = performOnMain {
                     guard let termSurface = surfaceView.terminalSurface,
@@ -6501,6 +6512,19 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         resolveWordUnderCursorPath(at: point)?.path
     }
 
+    @MainActor
+    func expandedTerminalOpenURLText(rawText: String) -> String {
+        let trimmedRawText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRawText.isEmpty else {
+            return rawText
+        }
+        let matchingToken = resolveVisibleTokenCandidatesUnderCursor()
+            .map { $0.rawToken.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count > trimmedRawText.count && $0.contains(trimmedRawText) }
+            .min { $0.count < $1.count }
+        return matchingToken ?? rawText
+    }
+
     private func resolveWordUnderCursorPath(at point: NSPoint? = nil) -> WordPathResolution? {
         guard let surface = surface else { return nil }
 
@@ -6708,6 +6732,49 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return convert(window.mouseLocationOutsideOfEventStream, from: nil)
     }
 
+    private func resolveVisibleTokenCandidatesUnderCursor(
+        at point: NSPoint? = nil
+    ) -> [TerminalVisibleTokenResolution] {
+        guard let termSurface = terminalSurface,
+              let workspace = termSurface.owningWorkspace(),
+              let panel = workspace.terminalPanel(for: termSurface.id),
+              let surface else {
+            return []
+        }
+
+        let size = ghostty_surface_size(surface)
+        let rows = max(Int(size.rows), 1)
+        let cols = max(Int(size.columns), 1)
+        let resolvedCellWidth = cellSize.width > 0 ? cellSize.width : CGFloat(size.cell_width_px)
+        let resolvedCellHeight = cellSize.height > 0 ? cellSize.height : CGFloat(size.cell_height_px)
+        guard resolvedCellWidth > 0, resolvedCellHeight > 0 else { return [] }
+
+        let snapshotPoint = preferredPointerPoint(from: point)
+        guard let snapshotPoint else { return [] }
+
+        let visibleText = TerminalController.shared.readTerminalTextForSnapshot(
+            terminalPanel: panel,
+            lineLimit: max(200, rows * 4)
+        ) ?? ""
+        let visibleLines = visibleText.visibleLines(rows: rows)
+        let rowOffset = max(0, rows - visibleLines.count)
+        let xInset = max(0, (bounds.width - (CGFloat(cols) * resolvedCellWidth)) / 2)
+        let yInset = max(0, (bounds.height - (CGFloat(rows) * resolvedCellHeight)) / 2)
+
+        let yFromTop = bounds.height - snapshotPoint.y
+        let rowFromTop = max(0, min(rows - 1, Int((yFromTop - yInset) / resolvedCellHeight)))
+        let visibleRow = rowFromTop - rowOffset
+        guard visibleRow >= 0, visibleRow < visibleLines.count else { return [] }
+
+        let column = max(0, min(cols - 1, Int((snapshotPoint.x - xInset) / resolvedCellWidth)))
+        return TerminalPathResolver().visibleWrappedTokenCandidates(
+            visibleLines,
+            row: visibleRow,
+            column: column,
+            columns: cols
+        )
+    }
+
     private func resolveVisibleWordPathFromViewportOffset(
         _ viewportOffsetStart: Int,
         cwd: String,
@@ -6733,9 +6800,11 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard visibleRow >= 0, visibleRow < visibleLines.count else { return nil }
 
         let column = max(0, min(cols - 1, viewportOffsetStart % cols))
-        guard let resolution = TerminalPathResolver().resolveVisibleLinePath(
-            visibleLines[visibleRow],
+        guard let resolution = TerminalPathResolver().resolveVisibleWrappedLinePath(
+            visibleLines,
+            row: visibleRow,
             column: column,
+            columns: cols,
             cwd: cwd
         ) else {
             return nil
@@ -6781,9 +6850,11 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard visibleRow >= 0, visibleRow < visibleLines.count else { return nil }
 
         let column = max(0, min(cols - 1, Int((point.x - xInset) / resolvedCellWidth)))
-        guard let resolution = TerminalPathResolver().resolveVisibleLinePath(
-            visibleLines[visibleRow],
+        guard let resolution = TerminalPathResolver().resolveVisibleWrappedLinePath(
+            visibleLines,
+            row: visibleRow,
             column: column,
+            columns: cols,
             cwd: cwd
         ) else {
             return nil
