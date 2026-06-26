@@ -5453,6 +5453,15 @@ struct CMUXCLI {
         )
     }
 
+    func openFileWithDefaultApplication(_ filePath: String) throws {
+        let standardized = URL(fileURLWithPath: filePath).standardizedFileURL.path
+        try runOpenTool(
+            arguments: [standardized],
+            failureMessage: localizedFormat("cli.pathOpen.error.defaultAppOpenFailed", defaultValue: "Failed to open %@ in the default app", standardized),
+            environment: launchServicesPathOpenEnvironment()
+        )
+    }
+
     private func runOpenTool(
         arguments: [String],
         failureMessage: String,

@@ -147,6 +147,7 @@ extension CMUXCLI {
 
     private enum OpenTarget {
         case directory(String)
+        case externalFile(String)
         case file(String)
         case url(String, defaultFocus: Bool)
     }
@@ -836,22 +837,50 @@ extension CMUXCLI {
         var urlCount = 0
         var directoryCount = 0
 
-        let client = try connectClient(
-            socketPath: socketPath,
-            explicitPassword: explicitPassword,
-            launchIfNeeded: true
-        )
-        defer { client.close() }
-
-        let windowHandle = try normalizeWindowHandle(parsedArgs.window, client: client)
-        let workspaceRaw = parsedArgs.workspace ?? (parsedArgs.window == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
-        let workspaceHandle = try normalizeWorkspaceHandle(workspaceRaw, client: client, windowHandle: windowHandle)
-        let shouldInheritCallerSurface = parsedArgs.workspace == nil && parsedArgs.pane == nil && parsedArgs.window == nil
-        let surfaceRaw = parsedArgs.surface ?? (shouldInheritCallerSurface ? ProcessInfo.processInfo.environment["CMUX_SURFACE_ID"] : nil)
-        let surfaceHandle = try normalizeSurfaceHandle(surfaceRaw, client: client, workspaceHandle: workspaceHandle, windowHandle: windowHandle)
-        let paneHandle = try normalizePaneHandle(parsedArgs.pane, client: client, workspaceHandle: workspaceHandle)
-
+        var client: SocketClient?
+        defer { client?.close() }
         var payloads: [[String: Any]] = []
+
+        func activeClient() throws -> SocketClient {
+            if let client {
+                return client
+            }
+            let newClient = try connectClient(
+                socketPath: socketPath,
+                explicitPassword: explicitPassword,
+                launchIfNeeded: true
+            )
+            client = newClient
+            return newClient
+        }
+
+        var cachedRoutingHandles: (window: String?, workspace: String?, surface: String?, pane: String?)?
+        func routingHandles() throws -> (window: String?, workspace: String?, surface: String?, pane: String?) {
+            if let cachedRoutingHandles {
+                return cachedRoutingHandles
+            }
+            let client = try activeClient()
+            let windowHandle = try normalizeWindowHandle(parsedArgs.window, client: client)
+            let workspaceRaw = parsedArgs.workspace ?? (parsedArgs.window == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
+            let workspaceHandle = try normalizeWorkspaceHandle(workspaceRaw, client: client, windowHandle: windowHandle)
+            let shouldInheritCallerSurface = parsedArgs.workspace == nil && parsedArgs.pane == nil && parsedArgs.window == nil
+            let surfaceRaw = parsedArgs.surface ?? (shouldInheritCallerSurface ? ProcessInfo.processInfo.environment["CMUX_SURFACE_ID"] : nil)
+            let surfaceHandle = try normalizeSurfaceHandle(surfaceRaw, client: client, workspaceHandle: workspaceHandle, windowHandle: windowHandle)
+            let paneHandle = try normalizePaneHandle(parsedArgs.pane, client: client, workspaceHandle: workspaceHandle)
+            let handles = (window: windowHandle, workspace: workspaceHandle, surface: surfaceHandle, pane: paneHandle)
+            cachedRoutingHandles = handles
+            return handles
+        }
+
+        let requiresSocket = targets.contains { target in
+            if case .externalFile = target {
+                return false
+            }
+            return true
+        }
+        if requiresSocket {
+            _ = try routingHandles()
+        }
 
         var pendingFiles: [String] = []
         func flushPendingFiles() throws {
@@ -859,11 +888,13 @@ extension CMUXCLI {
             let files = pendingFiles
             pendingFiles.removeAll()
 
+            let client = try activeClient()
+            let handles = try routingHandles()
             var params: [String: Any] = ["paths": files, "focus": fileFocus]
-            if let windowHandle { params["window_id"] = windowHandle }
-            if let workspaceHandle { params["workspace_id"] = workspaceHandle }
-            if let surfaceHandle { params["surface_id"] = surfaceHandle }
-            if let paneHandle { params["pane_id"] = paneHandle }
+            if let windowHandle = handles.window { params["window_id"] = windowHandle }
+            if let workspaceHandle = handles.workspace { params["workspace_id"] = workspaceHandle }
+            if let surfaceHandle = handles.surface { params["surface_id"] = surfaceHandle }
+            if let paneHandle = handles.pane { params["pane_id"] = paneHandle }
             let payload = try client.sendV2(method: "file.open", params: params)
             payloads.append(["kind": "file", "payload": payload])
             fileCount += files.count
@@ -873,19 +904,28 @@ extension CMUXCLI {
             switch target {
             case .file(let path):
                 pendingFiles.append(path)
+            case .externalFile(let path):
+                try flushPendingFiles()
+                try openFileWithDefaultApplication(path)
+                payloads.append(["kind": "url", "path": path, "external": true])
+                urlCount += 1
             case .directory(let directory):
                 try flushPendingFiles()
+                let client = try activeClient()
+                let handles = try routingHandles()
                 var params: [String: Any] = ["cwd": directory]
-                if let windowHandle { params["window_id"] = windowHandle }
+                if let windowHandle = handles.window { params["window_id"] = windowHandle }
                 let payload = try client.sendV2(method: "workspace.create", params: params)
                 payloads.append(["kind": "workspace", "payload": payload, "path": directory])
                 directoryCount += 1
             case .url(let url, let defaultFocus):
                 try flushPendingFiles()
+                let client = try activeClient()
+                let handles = try routingHandles()
                 var params: [String: Any] = ["url": url, "focus": explicitFocus ?? defaultFocus]
-                if let windowHandle { params["window_id"] = windowHandle }
-                if let workspaceHandle { params["workspace_id"] = workspaceHandle }
-                if let surfaceHandle { params["surface_id"] = surfaceHandle }
+                if let windowHandle = handles.window { params["window_id"] = windowHandle }
+                if let workspaceHandle = handles.workspace { params["workspace_id"] = workspaceHandle }
+                if let surfaceHandle = handles.surface { params["surface_id"] = surfaceHandle }
                 let payload = try client.sendV2(method: "browser.open_split", params: params)
                 payloads.append(["kind": "url", "payload": payload, "url": url])
                 urlCount += 1
@@ -1479,7 +1519,7 @@ extension CMUXCLI {
         }
         let ext = URL(fileURLWithPath: resolved).pathExtension.lowercased()
         if ext == "html" || ext == "htm" {
-            return .url(URL(fileURLWithPath: resolved).standardizedFileURL.absoluteString, defaultFocus: false)
+            return .externalFile(URL(fileURLWithPath: resolved).standardizedFileURL.path)
         }
         return .file(resolved)
     }
@@ -7932,7 +7972,7 @@ extension CMUXCLI {
         Usage: cmux open <path-or-url>... [options]
 
         Open files, directories, or URLs in cmux.
-        HTML files open in browser splits without focusing by default.
+        HTML files open in your default web browser.
         Markdown files open in markdown preview tabs; other files open in file preview tabs.
         Multiple files open as tabs in the same target pane.
 
