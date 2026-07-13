@@ -218,3 +218,37 @@ extension VerticalTabsSidebar {
             )
     }
 }
+
+/// Tree connector line drawn in the leading indent gutter of a grouped
+/// workspace row, visually nesting non-anchor members under their group header
+/// (├─ for interior members, └─ for the last member of the group).
+struct SidebarTreeLineView: View {
+    /// Whether this row is the last non-anchor member of its group. When true
+    /// the vertical stem stops at the branch (└─); otherwise it continues past
+    /// it to connect to the following sibling (├─).
+    let isLast: Bool
+
+    var body: some View {
+        SidebarTreeLineShape(isLast: isLast)
+            .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+            .allowsHitTesting(false)
+    }
+}
+
+private struct SidebarTreeLineShape: Shape {
+    let isLast: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let x = rect.midX
+        let midY = rect.midY
+        let stemEndY = isLast ? midY : rect.maxY
+        // Vertical stem from the top edge down to (or through) the branch.
+        path.move(to: CGPoint(x: x, y: rect.minY))
+        path.addLine(to: CGPoint(x: x, y: stemEndY))
+        // Horizontal branch reaching toward the row content.
+        path.move(to: CGPoint(x: x, y: midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: midY))
+        return path
+    }
+}

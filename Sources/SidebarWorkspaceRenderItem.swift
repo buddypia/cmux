@@ -19,13 +19,13 @@ enum SidebarWorkspaceRenderItemID: Hashable {
 @MainActor
 enum SidebarWorkspaceRenderItem {
     case groupHeader(WorkspaceGroup, memberWorkspaceIds: [UUID])
-    case workspace(Workspace)
+    case workspace(Workspace, isLastInGroup: Bool)
 
     var id: SidebarWorkspaceRenderItemID {
         switch self {
         case .groupHeader(let group, _):
             return .group(group.id)
-        case .workspace(let workspace):
+        case .workspace(let workspace, _):
             return .workspace(workspace.id)
         }
     }
@@ -34,7 +34,7 @@ enum SidebarWorkspaceRenderItem {
         switch self {
         case .groupHeader(let group, _):
             return group.anchorWorkspaceId
-        case .workspace(let workspace):
+        case .workspace(let workspace, _):
             return workspace.id
         }
     }
@@ -78,7 +78,13 @@ enum SidebarWorkspaceRenderItem {
                 continue
             }
             if groupId == nil || !skipChildrenUntilNextGroup {
-                items.append(.workspace(tab))
+                var isLastInGroup = false
+                if let groupId, let group = groupsById[groupId] {
+                    let nonAnchorMembers = (memberWorkspaceIdsByGroupId[groupId] ?? [])
+                        .filter { $0 != group.anchorWorkspaceId }
+                    isLastInGroup = nonAnchorMembers.last == tab.id
+                }
+                items.append(.workspace(tab, isLastInGroup: isLastInGroup))
             }
         }
         return items

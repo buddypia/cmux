@@ -11937,12 +11937,19 @@ struct VerticalTabsSidebar: View {
                         renderContext: renderContext,
                         shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets, showModifierHoldHints: showModifierHoldHints
                     )
-                case .workspace(let tab):
+                case .workspace(let tab, let isLastInGroup):
                     workspaceRow(
                         tab,
                         renderContext: renderContext,
                         shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets
                     )
+                    .padding(.leading, tab.groupId != nil ? SidebarWorkspaceGroupingMetrics.memberIndent : 0)
+                    .overlay(alignment: .leading) {
+                        if tab.groupId != nil {
+                            SidebarTreeLineView(isLast: isLastInGroup)
+                                .frame(width: SidebarWorkspaceGroupingMetrics.memberIndent)
+                        }
+                    }
                 }
             }
         }
