@@ -1,6 +1,7 @@
 import AppKit
 import Bonsplit
 import CMUXAgentLaunch
+import CmuxAgentChat
 import CmuxFoundation
 import CmuxSettings
 import CmuxSettingsUI
@@ -16,6 +17,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
     case files
     case find
     case sessions
+    case transcript
     case feed
     case dock
     case customSidebar = "custom-sidebar"
@@ -25,6 +27,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return String(localized: "rightSidebar.mode.files", defaultValue: "Files")
         case .find: return String(localized: "rightSidebar.mode.find", defaultValue: "Find")
         case .sessions: return String(localized: "rightSidebar.mode.sessions", defaultValue: "Vault")
+        case .transcript: return String(localized: "rightSidebar.mode.transcript", defaultValue: "Transcript")
         case .feed: return String(localized: "rightSidebar.mode.feed", defaultValue: "Feed")
         case .dock: return String(localized: "rightSidebar.mode.dock", defaultValue: "Dock")
         case .customSidebar: return String(localized: "rightSidebar.mode.customSidebar", defaultValue: "Custom")
@@ -36,6 +39,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return "folder"
         case .find: return "magnifyingglass"
         case .sessions: return "books.vertical"
+        case .transcript: return "text.bubble"
         case .feed: return "dot.radiowaves.left.and.right"
         case .dock: return "dock.rectangle"
         case .customSidebar: return "wand.and.stars"
@@ -47,6 +51,7 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return .switchRightSidebarToFiles
         case .find: return .switchRightSidebarToFind
         case .sessions: return .switchRightSidebarToSessions
+        case .transcript: return nil
         case .feed: return .switchRightSidebarToFeed
         case .dock: return .switchRightSidebarToDock
         case .customSidebar: return nil
@@ -74,7 +79,7 @@ nonisolated enum FileExplorerRootSyncPolicy {
         switch mode {
         case .files, .find:
             return true
-        case .sessions, .feed, .dock, .customSidebar:
+        case .sessions, .transcript, .feed, .dock, .customSidebar:
             return false
         }
     }
@@ -419,6 +424,8 @@ struct RightSidebarPanelView: View {
                     .onAppear {
                         sessionIndexStore.setCurrentDirectoryIfChanged(sessionIndexDirectory)
                     }
+            case .transcript:
+                agentTranscriptContent
             case .feed:
                 FeedPanelView()
             case .dock:
@@ -429,6 +436,48 @@ struct RightSidebarPanelView: View {
         } else {
             Color.clear
         }
+    }
+
+    /// The live agent transcript for the focused terminal's session, resolved
+    /// from the session registry. Follows focus: re-resolves whenever
+    /// `tabManager` publishes a focus change, and `.id(sessionID)` rebuilds the
+    /// conversation store when the bound session changes.
+    @ViewBuilder
+    private var agentTranscriptContent: some View {
+        if let tabId = workspaceId,
+           let surfaceId = tabManager.focusedSurfaceId(for: tabId),
+           let service = TerminalController.shared.agentChatTranscriptService,
+           let record = service.registry.liveSession(surfaceID: surfaceId.uuidString) {
+            DesktopAgentTranscriptView(
+                descriptor: record.descriptor,
+                source: DesktopChatEventSource(service: service)
+            )
+            .id(record.sessionID)
+        } else {
+            agentTranscriptEmptyState
+        }
+    }
+
+    private var agentTranscriptEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: 26))
+                .foregroundStyle(.tertiary)
+            Text(String(localized: "rightSidebar.transcript.empty", defaultValue: "No active agent session"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(
+                String(
+                    localized: "rightSidebar.transcript.empty.hint",
+                    defaultValue: "Focus a terminal running Claude, Codex, or Antigravity."
+                )
+            )
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 
     private var sessionIndexDirectory: String? {

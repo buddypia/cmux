@@ -14,6 +14,11 @@ final class AgentChatTranscriptService {
     let resolver: AgentChatTranscriptResolver
     private let coding = ChatWireCoding()
     private var tailers: [String: AgentChatTranscriptTailer] = [:]
+    /// In-process live event subscribers (the macOS desktop transcript panel),
+    /// keyed by session id then a per-subscription token. Fed directly by
+    /// `emit(frame:)` with no mobile RPC round-trip, so a desktop panel streams
+    /// even when no phone is connected. See `subscribeInProcess(sessionID:)`.
+    private var inProcessSubscribers: [String: [UUID: AsyncStream<ChatSessionEvent>.Continuation]] = [:]
     /// Sessions whose transcript could not be resolved; skipped until an
     /// explicit history request retries, so per-hook-event resolution
     /// failures don't rescan the filesystem during tool storms.
@@ -342,6 +347,40 @@ final class AgentChatTranscriptService {
         return page
     }
 
+    /// Opens an in-process live event stream for a desktop surface (the macOS
+    /// transcript panel), bypassing the mobile RPC path.
+    ///
+    /// Starts the session's tailer on demand so events flow even with no phone
+    /// connected — mirroring `history`'s on-demand tailer start. The stream
+    /// finishes when the caller drops it; callers combine this with `history`
+    /// for the initial backfill, exactly like the mobile event source.
+    ///
+    /// - Parameter sessionID: The session to observe.
+    /// - Returns: Live `ChatSessionEvent`s for the session.
+    func subscribeInProcess(sessionID: String) -> AsyncStream<ChatSessionEvent> {
+        let token = UUID()
+        return AsyncStream { continuation in
+            inProcessSubscribers[sessionID, default: [:]][token] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    self?.removeInProcessSubscriber(sessionID: sessionID, token: token)
+                }
+            }
+            // Ensure the transcript is being tailed so live events arrive even
+            // when no mobile client has forced a tailer to start.
+            if let record = registry.record(sessionID: sessionID), record.state != .ended {
+                ensureTailer(for: record)
+            }
+        }
+    }
+
+    private func removeInProcessSubscriber(sessionID: String, token: UUID) {
+        inProcessSubscribers[sessionID]?.removeValue(forKey: token)
+        if inProcessSubscribers[sessionID]?.isEmpty == true {
+            inProcessSubscribers.removeValue(forKey: sessionID)
+        }
+    }
+
     /// Debug-socket dump of every registry record plus tailer liveness.
     func debugSessionDump() -> [[String: Any]] {
         registry.sessions(workspaceID: nil).map { record in
@@ -502,8 +541,19 @@ final class AgentChatTranscriptService {
     }
 
     private func emit(frame: ChatSessionEventFrame) {
+        deliverInProcess(frame)
         guard let payload = wirePayload(frame) else { return }
         MobileHostService.emitEvent(topic: Self.eventTopic, payload: payload)
+    }
+
+    /// Fans one event out to in-process desktop subscribers, skipping the wire
+    /// serialization the mobile path needs (`ChatSessionEvent` is already a
+    /// plain in-memory value).
+    private func deliverInProcess(_ frame: ChatSessionEventFrame) {
+        guard let subscribers = inProcessSubscribers[frame.sessionID] else { return }
+        for continuation in subscribers.values {
+            continuation.yield(frame.event)
+        }
     }
 
     private func newestClaudeTranscript(
@@ -655,4 +705,42 @@ final class AgentChatTranscriptService {
         }
         return object
     }
+}
+
+/// In-process ``ChatEventSource`` for the macOS desktop transcript panel,
+/// backed by the host's own ``AgentChatTranscriptService`` — no mobile RPC
+/// round-trip (`ChatMessage`/`ChatSessionEvent` are already plain in-memory
+/// Swift values).
+///
+/// Read-only for now: it serves history and live events so a desktop panel can
+/// render and follow a conversation. The write path (`send`/`interrupt`/
+/// `answer`/`submit`) is not wired yet and throws ``Unsupported``; a read-only
+/// transcript panel never invokes it.
+struct DesktopChatEventSource: ChatEventSource {
+    /// The host transcript service (`@MainActor`-isolated, hence `Sendable`).
+    let service: AgentChatTranscriptService
+
+    struct SessionNotFound: Error { let sessionID: String }
+    struct Unsupported: Error {}
+
+    func history(sessionID: String, beforeSeq: Int?, limit: Int) async throws -> ChatHistoryPage {
+        guard let page = await service.history(sessionID: sessionID, beforeSeq: beforeSeq, limit: limit) else {
+            throw SessionNotFound(sessionID: sessionID)
+        }
+        return page
+    }
+
+    func events(sessionID: String) async -> AsyncStream<ChatSessionEvent> {
+        await service.subscribeInProcess(sessionID: sessionID)
+    }
+
+    func send(text: String, attachments: [ChatOutboundAttachment], sessionID: String) async throws {
+        throw Unsupported()
+    }
+
+    func interrupt(sessionID: String, hard: Bool) async throws { throw Unsupported() }
+
+    func answer(optionIndex: Int, sessionID: String) async throws { throw Unsupported() }
+
+    func submit(sessionID: String) async throws { throw Unsupported() }
 }
