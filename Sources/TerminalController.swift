@@ -1945,6 +1945,7 @@ class TerminalController {
         var methods: [String] = [
             "system.ping",
             "system.capabilities",
+            "events.stream",
             "system.identify",
             "system.tree",
             "sidebar.custom.open",

@@ -621,6 +621,7 @@ final class TerminalControllerSocketSecurityTests {
             let expectedMethods: Set<String> = [
                 "system.ping",
                 "system.capabilities",
+                "events.stream",
                 "mobile.host.status",
                 "mobile.attach_ticket.create",
                 "mobile.workspace.list",
