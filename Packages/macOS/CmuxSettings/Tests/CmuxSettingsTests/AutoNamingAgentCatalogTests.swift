@@ -11,6 +11,7 @@ struct AutoNamingAgentCatalogTests {
         }
         #expect(!AutoNamingAgentCatalog.summarizerSupported(slug: "antigravity"))
         #expect(!AutoNamingAgentCatalog.summarizerSupported(slug: "gemini"))
+        #expect(!AutoNamingAgentCatalog.summarizerSupported(slug: "ollama"))
         #expect(!AutoNamingAgentCatalog.summarizerSupported(slug: "totally-unknown"))
     }
 
@@ -21,6 +22,7 @@ struct AutoNamingAgentCatalogTests {
         #expect(supported.contains("claude"))
         #expect(other.contains("antigravity"))
         #expect(other.contains("gemini"))
+        #expect(other.contains("ollama"))
         // Catalog flag and membership helper must agree for every option.
         for option in AutoNamingAgentCatalog.agents {
             #expect(option.summarizerSupported == AutoNamingAgentCatalog.summarizerSupported(slug: option.slug))

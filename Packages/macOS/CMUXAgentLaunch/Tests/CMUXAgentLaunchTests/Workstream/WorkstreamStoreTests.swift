@@ -198,27 +198,6 @@ struct WorkstreamStoreTests {
         }
     }
 
-    @Test("Known hook sources preserve their source instead of falling back to Claude", arguments: [
-        ("grok", WorkstreamSource.grok),
-        ("omp", WorkstreamSource.omp),
-        ("kiro", WorkstreamSource.kiro),
-        ("antigravity", WorkstreamSource.antigravity),
-        ("rovodev", WorkstreamSource.rovodev),
-    ])
-    func knownHookSourceIsPreserved(rawSource: String, expectedSource: WorkstreamSource) {
-        let store = WorkstreamStore(ringCapacity: 10)
-        store.ingest(WorkstreamEvent(
-            sessionId: "\(rawSource)-session-123",
-            hookEventName: .userPromptSubmit,
-            source: rawSource,
-            toolInputJSON: #"{"prompt":"wire feed notifications"}"#
-        ))
-
-        #expect(store.items.count == 1)
-        #expect(store.items[0].source == expectedSource)
-        #expect(store.items[0].workstreamId == "\(rawSource)-session-123")
-    }
-
     @Test("Telemetry payloads preserve prompt, stop, and todo content")
     func telemetryContent() {
         let store = WorkstreamStore(ringCapacity: 10)

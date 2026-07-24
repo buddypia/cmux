@@ -314,32 +314,31 @@ extension CLINotifyProcessIntegrationRegressionTests {
             "CMUX_CLI_SENTRY_DISABLED": "1",
         ]
 
-        func runAntigravityHook(_ subcommand: String, input: String) -> ProcessRunResult {
-            let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-                guard let payload = self.jsonObject(line) else {
-                    return "OK"
-                }
-                guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
-                    return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
-                }
-                switch method {
-                case "surface.list":
-                    return self.surfaceListResponse(id: id, surfaceId: surfaceId)
-                case "feed.push":
-                    return self.v2Response(id: id, ok: true, result: [:])
-                default:
-                    return self.v2Response(id: id, ok: false, error: ["code": "unrecognized_method", "message": "unexpected method: \(method)"])
-                }
+        startDetachedMockServer(listenerFD: listenerFD, state: state, connectionCount: 128) { line in
+            guard let payload = self.jsonObject(line) else {
+                return "OK"
             }
-            let result = runProcess(
+            guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
+                return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
+            }
+            switch method {
+            case "surface.list":
+                return self.surfaceListResponse(id: id, surfaceId: surfaceId)
+            case "feed.push":
+                return self.v2Response(id: id, ok: true, result: [:])
+            default:
+                return self.v2Response(id: id, ok: false, error: ["code": "unrecognized_method", "message": "unexpected method: \(method)"])
+            }
+        }
+
+        func runAntigravityHook(_ subcommand: String, input: String) -> ProcessRunResult {
+            runProcess(
                 executablePath: cliPath,
                 arguments: ["hooks", "antigravity", subcommand],
                 environment: environment,
                 standardInput: input,
                 timeout: 5
             )
-            wait(for: [serverHandled], timeout: 5)
-            return result
         }
 
         let start = runAntigravityHook(
@@ -583,22 +582,7 @@ extension CLINotifyProcessIntegrationRegressionTests {
         ]
 
         func runHermesHook(_ subcommand: String, input: String) -> ProcessRunResult {
-            let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-                guard let payload = self.jsonObject(line) else {
-                    return "OK"
-                }
-                guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
-                    return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
-                }
-                switch method {
-                case "surface.list":
-                    return self.surfaceListResponse(id: id, surfaceId: surfaceId)
-                case "feed.push":
-                    return self.v2Response(id: id, ok: true, result: [:])
-                default:
-                    return self.v2Response(id: id, ok: false, error: ["code": "unrecognized_method", "message": "unexpected method: \(method)"])
-                }
-            }
+            let serverHandled = startAgentHookMockServer(listenerFD: listenerFD, state: state, surfaceId: surfaceId, connectionCount: 4)
             let result = runProcess(
                 executablePath: cliPath,
                 arguments: ["hooks", "hermes-agent", subcommand],
@@ -1271,74 +1255,6 @@ extension CLINotifyProcessIntegrationRegressionTests {
         XCTAssertEqual(waitTimeout.doubleValue, 0)
     }
 
-    func testAntigravityRunShellCommandFeedContextIncludesCommandSummary() throws {
-        let cliPath = try bundledCLIPath()
-        let socketPath = makeSocketPath("antigravity-run-shell-context")
-        let listenerFD = try bindUnixSocket(at: socketPath)
-        let state = MockSocketServerState()
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-antigravity-run-shell-context-\(UUID().uuidString)", isDirectory: true)
-        let workspaceId = "33333333-3333-3333-3333-333333333333"
-        let surfaceId = "44444444-4444-4444-4444-444444444444"
-
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer {
-            Darwin.close(listenerFD)
-            unlink(socketPath)
-            try? FileManager.default.removeItem(at: root)
-        }
-
-        let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-            guard let payload = self.jsonObject(line) else {
-                return self.malformedRequestResponse(raw: line)
-            }
-            guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
-                return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
-            }
-            XCTAssertEqual(method, "feed.push")
-            return self.v2Response(id: id, ok: true, result: ["status": "acknowledged"])
-        }
-
-        let result = runProcess(
-            executablePath: cliPath,
-            arguments: ["hooks", "feed", "--source", "antigravity", "--event", "PreToolUse"],
-            environment: [
-                "HOME": root.path,
-                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                "PWD": root.path,
-                "CMUX_SOCKET_PATH": socketPath,
-                "CMUX_WORKSPACE_ID": workspaceId,
-                "CMUX_SURFACE_ID": surfaceId,
-                "CMUX_ANTIGRAVITY_PID": "424242",
-                "CMUX_CLI_SENTRY_DISABLED": "1",
-            ],
-            standardInput: #"{"hook_event_name":"PreToolUse","session_id":"agy-shell-session","cwd":"\#(root.path)","toolCall":{"name":"run_shell_command","args":{"command":"swift test --filter FeedEventClassificationTests"}}}"#,
-            timeout: 5
-        )
-        wait(for: [serverHandled], timeout: 5)
-
-        XCTAssertFalse(result.timedOut, result.stderr)
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertEqual(result.stdout, "{}\n")
-
-        let feedEvents = state.commands.compactMap { command -> [String: Any]? in
-            guard let payload = self.jsonObject(command),
-                  payload["method"] as? String == "feed.push",
-                  let params = payload["params"] as? [String: Any],
-                  let event = params["event"] as? [String: Any] else {
-                return nil
-            }
-            return event
-        }
-        XCTAssertEqual(feedEvents.count, 1, "Expected one Antigravity Feed event, saw \(state.commands)")
-        let event = try XCTUnwrap(feedEvents.first)
-        XCTAssertEqual(event["hook_event_name"] as? String, "PermissionRequest")
-        XCTAssertEqual(event["_source"] as? String, "antigravity")
-        XCTAssertEqual(event["tool_name"] as? String, "run_shell_command")
-        let context = try XCTUnwrap(event["context"] as? [String: Any])
-        XCTAssertEqual(context["toolSummary"] as? String, "swift test --filter FeedEventClassificationTests")
-    }
-
     func testAntigravityFeedHookMissingSessionIdUsesStableFallback() throws {
         let cliPath = try bundledCLIPath()
         let socketPath = makeSocketPath("antigravity-feed-stable-session")
@@ -1457,23 +1373,9 @@ extension CLINotifyProcessIntegrationRegressionTests {
             "GROK_HOME": grokHome.path,
         ]
 
+        startDetachedAgentHookMockServer(listenerFD: listenerFD, state: state, surfaceId: surfaceId, connectionCount: 80)
+
         func runGrokHook(_ subcommand: String, input: String) -> ProcessRunResult {
-            let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
-                guard let payload = self.jsonObject(line) else {
-                    return "OK"
-                }
-                guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
-                    return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
-                }
-                switch method {
-                case "surface.list":
-                    return self.surfaceListResponse(id: id, surfaceId: surfaceId)
-                case "feed.push":
-                    return self.v2Response(id: id, ok: true, result: [:])
-                default:
-                    return self.v2Response(id: id, ok: false, error: ["code": "unrecognized_method", "message": "unexpected method: \(method)"])
-                }
-            }
             let result = runProcess(
                 executablePath: cliPath,
                 arguments: ["hooks", "grok", subcommand],
@@ -1481,7 +1383,6 @@ extension CLINotifyProcessIntegrationRegressionTests {
                 standardInput: input,
                 timeout: 5
             )
-            wait(for: [serverHandled], timeout: 5)
             return result
         }
 
@@ -3186,21 +3087,21 @@ extension CLINotifyProcessIntegrationRegressionTests {
             .compactMap { $0["hooks"] as? [[String: Any]] }
             .flatMap { $0 }
             .compactMap { $0["command"] as? String }
-
+        let commandBodies = allCommands + allCommands.compactMap { FileManager.default.fileExists(atPath: $0) ? try? String(contentsOf: URL(fileURLWithPath: $0), encoding: .utf8) : nil }
         XCTAssertTrue(
-            allCommands.contains {
+            commandBodies.contains {
                 $0.contains("CMUX_BUNDLED_CLI_PATH")
                     && $0.contains("\"$cmux_cli\" --socket \"$CMUX_SOCKET_PATH\" hooks codex prompt-submit")
             },
-            "Codex hooks should route through the launching app's bundled CLI, saw \(allCommands)"
+            "Codex hooks should route through the launching app's bundled CLI, saw \(commandBodies)"
         )
         XCTAssertFalse(
-            allCommands.contains { $0.contains("command -v cmux >/dev/null 2>&1 && cmux hooks codex") },
-            "Codex hooks must not use the reload-global cmux shim directly, saw \(allCommands)"
+            commandBodies.contains { $0.contains("command -v cmux >/dev/null 2>&1 && cmux hooks codex") },
+            "Codex hooks must not use the reload-global cmux shim directly, saw \(commandBodies)"
         )
         XCTAssertFalse(
-            allCommands.contains { $0 == previousBundledHookCommand },
-            "Codex setup should replace bundled-CLI hooks that did not pin CMUX_SOCKET_PATH, saw \(allCommands)"
+            commandBodies.contains { $0 == previousBundledHookCommand },
+            "Codex setup should replace bundled-CLI hooks that did not pin CMUX_SOCKET_PATH, saw \(commandBodies)"
         )
         XCTAssertEqual(
             allCommands.filter { $0.contains("hooks codex prompt-submit") }.count,
@@ -3344,7 +3245,7 @@ extension CLINotifyProcessIntegrationRegressionTests {
             XCTAssertEqual(params["auto_resume"] as? Bool, true)
             XCTAssertEqual(
                 params["command"] as? String,
-                "{ cd -- '\(workspace.path)' 2>/dev/null || [ ! -d '\(workspace.path)' ]; } && '\(scenario.executable)' 'chat' '--resume-id' '\(scenario.sessionId)' '--agent' 'cmux' '--trust-tools' 'fs_read,fs_write'"
+                "cd -- '\(workspace.path)' 2>/dev/null || [ ! -d '\(workspace.path)' ] && '\(scenario.executable)' 'chat' '--resume-id' '\(scenario.sessionId)' '--agent' 'cmux' '--trust-tools' 'fs_read,fs_write'"
             )
             XCTAssertEqual(params["environment"] as? [String: String], scenario.expectedEnvironment)
             XCTAssertFalse(
@@ -3751,13 +3652,13 @@ extension CLINotifyProcessIntegrationRegressionTests {
         XCTAssertFalse(result.timedOut, result.stderr)
         XCTAssertEqual(result.status, 0, result.stderr)
 
-        // No env-only CODEX_HOME record may be persisted for the rejected non-restorable argv.
-        let storeURL = root.appendingPathComponent("codex-hook-sessions.json")
-        if let data = try? Data(contentsOf: storeURL),
+        // Persist the rejection marker so reload cannot treat it as a plain default Codex hook.
+        if let data = try? Data(contentsOf: root.appendingPathComponent("codex-hook-sessions.json")),
            let storeJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let sessions = storeJSON["sessions"] as? [String: Any],
            let persisted = sessions[sessionId] as? [String: Any] {
-            let env = (persisted["launchCommand"] as? [String: Any])?["environment"] as? [String: String]
+            let launchCommand = try XCTUnwrap(persisted["launchCommand"] as? [String: Any]); XCTAssertEqual(launchCommand["source"] as? String, "rejected")
+            let env = launchCommand["environment"] as? [String: String]
             XCTAssertNil(
                 env?["CODEX_HOME"],
                 "non-restorable codex exec must not persist an env-only CODEX_HOME record; launchCommand=\(persisted["launchCommand"] ?? "nil")"

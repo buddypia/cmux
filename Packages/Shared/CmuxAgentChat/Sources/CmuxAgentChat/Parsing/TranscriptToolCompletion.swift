@@ -15,20 +15,6 @@ struct TranscriptToolCompletion: Sendable {
     /// Wall-clock duration in seconds, when one was parseable.
     let durationSeconds: Double?
 
-    /// Timestamp of the result row that completed the tool, when known.
-    let timestamp: Date?
-
-    /// Permission decision, when a transcript result resolves an actionable
-    /// permission card instead of a normal tool invocation.
-    let permissionResolution: ChatPermissionRequest.Resolution?
-
-    /// Question settlement, when a transcript lifecycle event closes an
-    /// unanswered question card.
-    let questionResolution: ChatQuestion.Resolution?
-
-    /// Whether a terminal output row reports a still-running process.
-    let terminalIsRunning: Bool
-
     /// Creates a completion.
     ///
     /// - Parameters:
@@ -40,20 +26,12 @@ struct TranscriptToolCompletion: Sendable {
         output: String?,
         isError: Bool,
         exitCode: Int? = nil,
-        durationSeconds: Double? = nil,
-        timestamp: Date? = nil,
-        permissionResolution: ChatPermissionRequest.Resolution? = nil,
-        questionResolution: ChatQuestion.Resolution? = nil,
-        terminalIsRunning: Bool = false
+        durationSeconds: Double? = nil
     ) {
         self.output = output
         self.isError = isError
         self.exitCode = exitCode
         self.durationSeconds = durationSeconds
-        self.timestamp = timestamp
-        self.permissionResolution = permissionResolution
-        self.questionResolution = questionResolution
-        self.terminalIsRunning = terminalIsRunning
     }
 
     /// Produces the completed copy of a pending tool message.
@@ -69,11 +47,11 @@ struct TranscriptToolCompletion: Sendable {
             let completed = ChatTerminalCapture(
                 command: capture.command,
                 output: output.map { budget.body($0) },
-                exitCode: terminalIsRunning ? exitCode : exitCode ?? (isError ? 1 : 0),
+                exitCode: exitCode ?? (isError ? 1 : 0),
                 durationSeconds: durationSeconds,
-                isRunning: terminalIsRunning
+                isRunning: false
             )
-            return message.replacingKind(.terminal(completed), timestamp: timestamp)
+            return message.replacingKind(.terminal(completed))
         case .toolUse(let toolUse):
             let failed = isError || (exitCode ?? 0) != 0
             let completed = ChatToolUse(
@@ -81,203 +59,95 @@ struct TranscriptToolCompletion: Sendable {
                 summary: toolUse.summary,
                 inputDetail: toolUse.inputDetail,
                 output: output.map { budget.body($0) },
-                status: failed ? .failed : .succeeded
+                status: failed ? .failed : .succeeded,
+                referencedPaths: toolUse.referencedPaths
             )
-            return message.replacingKind(.toolUse(completed), timestamp: timestamp)
+            return message.replacingKind(.toolUse(completed))
         case .question(let question):
-            guard let answer = answer(forPrompt: question.prompt) else {
-                guard let questionResolution else { return nil }
-                let resolved = ChatQuestion(
-                    prompt: question.prompt,
-                    options: question.options,
-                    resolution: questionResolution
-                )
-                return message.replacingKind(.question(resolved), timestamp: timestamp)
+            // Codex keys answers by question id, so a multi-question call
+            // resolves each card to its own answer; Claude keys by prompt.
+            let answer: String?
+            if let questionID = question.questionID {
+                answer = self.answer(forCodexQuestionID: questionID)
+            } else {
+                answer = self.answer(forPrompt: question.prompt)
             }
+            guard let answer else { return nil }
             let answered = ChatQuestion(
                 prompt: question.prompt,
                 options: question.options,
-                selectedOptionLabel: answer
+                selectedOptionLabel: answer,
+                questionID: question.questionID
             )
-            return message.replacingKind(.question(answered), timestamp: timestamp)
-        case .permissionRequest(let request):
-            guard let permissionResolution else { return nil }
-            let resolved = ChatPermissionRequest(
-                title: request.title,
-                subject: request.subject,
-                resolution: permissionResolution
-            )
-            return message.replacingKind(.permissionRequest(resolved), timestamp: timestamp)
+            return message.replacingKind(.question(answered))
         default:
             return nil
         }
     }
 
-    /// Extracts the chosen answer for a question prompt from completion text.
+    /// Extracts the chosen answer for a question prompt.
+    ///
+    /// Handles two formats:
+    /// - Claude: `Your questions have been answered: "Q"="A"...`.
+    /// - Codex `request_user_input`: a JSON output
+    ///   `{"answers":{"<id>":{"answers":["<label>"]}}}`. Codex keys answers by
+    ///   question id (not prompt), so for the common single-question picker the
+    ///   first non-empty answer is returned.
     ///
     /// - Parameter prompt: The question prompt to look up.
     /// - Returns: The answer text, or `nil` when not extractable.
     private func answer(forPrompt prompt: String) -> String? {
         guard let output else { return nil }
-        if let proseAnswer = Self.proseAnswer(forPrompt: prompt, in: output) {
-            return proseAnswer
-        }
-
-        guard let json = Self.jsonValue(fromText: output) else { return nil }
-        return Self.jsonAnswer(forPrompt: prompt, in: json)
-    }
-
-    /// Extracts the chosen answer from the
-    /// `Your questions have been answered: "Q"="A"...` result text.
-    private static func proseAnswer(forPrompt prompt: String, in output: String) -> String? {
+        // Claude `"Q"="A"` format.
         let needle = "\"\(prompt)\"=\""
-        guard let start = output.range(of: needle) else { return nil }
-        let tail = output[start.upperBound...]
-        guard let end = tail.range(of: "\"") else { return nil }
-        let answer = String(tail[..<end.lowerBound])
-        return Self.nonEmpty(answer)
-    }
-
-    private static func jsonAnswer(forPrompt prompt: String, in value: TranscriptJSONValue) -> String? {
-        if let object = value.object {
-            if promptsMatch(object, prompt), let answer = answerString(in: object) {
-                return answer
-            }
-
-            for mappingKey in mappingKeys {
-                guard let mapped = object[mappingKey] else { continue }
-                if let mappedObject = mapped.object {
-                    for (mappedPrompt, answerValue) in mappedObject where promptsMatch(mappedPrompt, prompt) {
-                        if let answer = answerString(from: answerValue) {
-                            return answer
-                        }
-                    }
-                }
-                if let answer = jsonAnswer(forPrompt: prompt, in: mapped) {
-                    return answer
-                }
-            }
-
-            for (mappedPrompt, answerValue) in object where promptsMatch(mappedPrompt, prompt) {
-                if let answer = answerString(from: answerValue) {
-                    return answer
-                }
-            }
-
-            for nestedKey in nestedKeys {
-                guard let nested = object[nestedKey],
-                      let answer = jsonAnswer(forPrompt: prompt, in: nested)
-                else { continue }
-                return answer
+        if let start = output.range(of: needle) {
+            let tail = output[start.upperBound...]
+            if let end = tail.range(of: "\"") {
+                let answer = String(tail[..<end.lowerBound])
+                if !answer.isEmpty { return answer }
             }
         }
-
-        if let array = value.array {
-            for item in array {
-                if let answer = jsonAnswer(forPrompt: prompt, in: item) {
-                    return answer
+        // Codex JSON `{"answers":{<id>:{"answers":[<label>]}}}` format (fallback
+        // for a codex question with no id: first non-empty answer).
+        if let answers = codexAnswers(from: output) {
+            for value in answers.values {
+                if let labels = value["answers"] as? [String],
+                   let first = labels.first(where: { !$0.isEmpty }) {
+                    return first
                 }
             }
-        }
-
-        if let string = value.string {
-            if let answer = proseAnswer(forPrompt: prompt, in: string) {
-                return answer
-            }
-            if let nested = jsonValue(fromText: string) {
-                return jsonAnswer(forPrompt: prompt, in: nested)
-            }
-        }
-
-        return nil
-    }
-
-    private static func answerString(in object: [String: TranscriptJSONValue]) -> String? {
-        for key in answerKeys {
-            guard let value = object[key], let answer = answerString(from: value) else { continue }
-            return answer
         }
         return nil
     }
 
-    private static func answerString(from value: TranscriptJSONValue) -> String? {
-        if let string = value.string {
-            return nonEmpty(string)
-        }
-
-        if value.double != nil || value.bool != nil {
-            return nonEmpty(value.compactJSONString())
-        }
-
-        if let array = value.array {
-            let answers = array.compactMap(answerString(from:))
-            guard !answers.isEmpty else { return nil }
-            return answers.joined(separator: ", ")
-        }
-
-        if let object = value.object {
-            return answerString(in: object)
-        }
-
-        return nil
+    /// The chosen answer for a specific Codex question id, from the
+    /// `request_user_input` output `{"answers":{"<id>":{"answers":["<label>"]}}}`.
+    /// Matching by id lets a multi-question call resolve each card correctly.
+    private func answer(forCodexQuestionID id: String) -> String? {
+        guard let output,
+              let answers = codexAnswers(from: output),
+              let entry = answers[id],
+              let labels = entry["answers"] as? [String] else { return nil }
+        return labels.first(where: { !$0.isEmpty })
     }
 
-    private static func promptsMatch(_ object: [String: TranscriptJSONValue], _ prompt: String) -> Bool {
-        for key in promptKeys {
-            guard let candidate = object[key]?.string, promptsMatch(candidate, prompt) else { continue }
-            return true
-        }
-        return false
+    /// Parses the `answers` object out of a Codex `request_user_input` output.
+    private func codexAnswers(from output: String) -> [String: [String: Any]]? {
+        guard output.contains("\"answers\""),
+              let data = output.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let answers = root["answers"] as? [String: Any] else { return nil }
+        return answers.compactMapValues { $0 as? [String: Any] }
     }
-
-    private static func promptsMatch(_ candidate: String, _ prompt: String) -> Bool {
-        nonEmpty(candidate) == nonEmpty(prompt)
-    }
-
-    private static func jsonValue(fromText text: String) -> TranscriptJSONValue? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.first == "{" || trimmed.first == "[" else { return nil }
-        return TranscriptJSONValue(jsonString: trimmed)
-    }
-
-    private static func nonEmpty(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private static let promptKeys = ["question", "prompt", "header"]
-    private static let answerKeys = [
-        "answer",
-        "response",
-        "selected",
-        "selection",
-        "selectedOption",
-        "selected_option",
-        "selectedOptionLabel",
-        "selected_option_label",
-        "value",
-        "label",
-        "title",
-    ]
-    private static let mappingKeys = [
-        "answers",
-        "responses",
-        "selections",
-        "selectedOptions",
-        "selected_options",
-        "questions",
-        "results",
-    ]
-    private static let nestedKeys = ["output", "result", "data", "payload", "response", "functionResponse"]
 }
 
 extension ChatMessage {
     /// Copies the message with a different payload, keeping identity,
-    /// position and author, optionally replacing the timestamp.
+    /// position, author, and timestamp.
     ///
     /// - Parameter kind: The replacement payload.
     /// - Returns: The copied message.
-    func replacingKind(_ kind: ChatMessageKind, timestamp replacementTimestamp: Date? = nil) -> ChatMessage {
-        ChatMessage(id: id, seq: seq, role: role, timestamp: replacementTimestamp ?? timestamp, kind: kind)
+    func replacingKind(_ kind: ChatMessageKind) -> ChatMessage {
+        ChatMessage(id: id, seq: seq, role: role, timestamp: timestamp, kind: kind)
     }
 }

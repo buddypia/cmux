@@ -89,6 +89,68 @@ enum AuthEnvironment {
         )
     }
 
+    /// Pricing page used by every "Upgrade to cmux Pro" entrypoint
+    /// (Settings, command palette, Help menu). Resolution order mirrors
+    /// ``vmAPIBaseURL``: process env `CMUX_WWW_ORIGIN`, then the DEBUG-only
+    /// `~/.cmux-dev.env` file (so a deeplink-launched dev build can point at
+    /// a local web server), then the production website.
+    static var pricingURL: URL {
+        resolvedPricingURL(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolvedPricingURL(environment: [String: String]) -> URL {
+        appWebOrigin(environment: environment).appendingPathComponent("pricing")
+    }
+
+    static var appPricingURL: URL {
+        resolvedAppPricingURL(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static var appWebOrigin: URL {
+        resolvedAppWebOrigin(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolvedAppWebOrigin(environment: [String: String]) -> URL {
+        appWebOrigin(environment: environment)
+    }
+
+    static func resolvedAppPricingURL(environment: [String: String]) -> URL {
+        appWebOrigin(environment: environment).appendingPathComponent("app-pricing")
+    }
+
+    static var appProWelcomeURL: URL {
+        resolvedAppProWelcomeURL(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolvedAppProWelcomeURL(environment: [String: String]) -> URL {
+        appWebOrigin(environment: environment).appendingPathComponent("app-pro-welcome")
+    }
+
+    /// Payment entrypoint used by native app UI. `CMUX_BILLING_WWW_ORIGIN`
+    /// can explicitly pin checkout elsewhere, otherwise checkout follows the
+    /// same app web origin as `/app-pricing`. Direct Stripe Checkout binds the
+    /// purchaser to the server-created session, so dev builds must start the
+    /// request on the same origin that rendered pricing instead of crossing to
+    /// production.
+    static var billingCheckoutURL: URL {
+        resolvedBillingCheckoutURL(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolvedBillingCheckoutURL(environment: [String: String]) -> URL {
+        billingCheckoutURL(
+            origin: billingWebsiteOrigin(environment: environment),
+            callbackScheme: callbackScheme(environment: environment, bundleIdentifier: nil)
+        )
+    }
+
+    static var billingPortalURL: URL {
+        resolvedBillingPortalURL(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func resolvedBillingPortalURL(environment: [String: String]) -> URL {
+        billingWebsiteOrigin(environment: environment).appendingPathComponent("api/billing/portal")
+    }
+
     static var signInWebsiteOrigin: URL {
         canonicalizedLoopbackURL(
             resolvedURL(
@@ -128,6 +190,62 @@ enum AuthEnvironment {
         return canonicalizedLoopbackURL(URL(string: defaultVMAPIOrigin)!)
     }
 
+    /// Authenticated route broker shared by matching tagged Mac and iOS builds.
+    ///
+    /// General tagged APIs remain on their isolated localhost origin. Iroh uses
+    /// shared staging in Debug so separately launched processes publish into one
+    /// account-scoped registry. Release keeps the production cmux origin.
+    static var irohBrokerBaseURL: URL? {
+        let environment = ProcessInfo.processInfo.environment
+        if let overridden = environment["CMUX_IROH_BROKER_BASE_URL"]?
+           .trimmingCharacters(in: .whitespacesAndNewlines),
+           !overridden.isEmpty {
+            return validatedIrohBrokerURL(overridden)
+        }
+        #if DEBUG
+        if let override = devOverride(key: "CMUX_IROH_BROKER_BASE_URL") {
+            return validatedIrohBrokerURL(override)
+        }
+        return resolvedIrohBrokerBaseURL(environment: environment, isDebugBuild: true)
+        #else
+        return resolvedIrohBrokerBaseURL(environment: environment, isDebugBuild: false)
+        #endif
+    }
+
+    static func resolvedIrohBrokerBaseURL(
+        environment: [String: String],
+        isDebugBuild: Bool
+    ) -> URL? {
+        if let explicit = environment["CMUX_IROH_BROKER_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return validatedIrohBrokerURL(explicit)
+        }
+        let fallback = isDebugBuild
+            ? "https://cmux-staging.vercel.app"
+            : "https://cmux.com"
+        return validatedIrohBrokerURL(fallback)
+    }
+
+    private static func validatedIrohBrokerURL(_ rawValue: String) -> URL? {
+        guard let url = URL(string: rawValue),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(),
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil else {
+            return nil
+        }
+        if scheme == "https" { return url }
+        guard scheme == "http",
+              ["127.0.0.1", "::1", "localhost"].contains(host) else {
+            return nil
+        }
+        return canonicalizedLoopbackURL(url)
+    }
+
     /// Look up `key=value` in `~/.cmux-dev.env` for the DEBUG build. Returns nil in Release.
     /// Kept tiny on purpose — this is a "drop a file, restart the app, it picks up" override,
     /// not a real config system.
@@ -154,6 +272,51 @@ enum AuthEnvironment {
 
     private static var cmuxPort: String {
         resolvedCmuxPort(environment: ProcessInfo.processInfo.environment)
+    }
+
+    private static func billingWebsiteOrigin(environment: [String: String]) -> URL {
+        if let overridden = environmentURL("CMUX_BILLING_WWW_ORIGIN", environment: environment) {
+            return overridden
+        }
+        return appWebOrigin(environment: environment)
+    }
+
+    private static func appWebOrigin(environment: [String: String]) -> URL {
+        if let explicitWebsite = environmentURL("CMUX_WWW_ORIGIN", environment: environment) {
+            return canonicalizedLoopbackURL(explicitWebsite)
+        }
+        if let authWebsite = environmentURL("CMUX_AUTH_WWW_ORIGIN", environment: environment) {
+            return canonicalizedLoopbackURL(authWebsite)
+        }
+        #if DEBUG
+        if environmentPort("CMUX_PORT", environment: environment) != nil ||
+            environmentPort("PORT", environment: environment) != nil {
+            return URL(string: resolvedDefaultWebOrigin(environment: environment))!
+        }
+        if let override = devOverride(key: "CMUX_WWW_ORIGIN"),
+           let url = URL(string: override) {
+            return canonicalizedLoopbackURL(url)
+        }
+        #endif
+        return resolvedURL(
+            environmentKey: "CMUX_WWW_ORIGIN",
+            fallback: resolvedDefaultWebOrigin(environment: environment),
+            environment: environment
+        )
+    }
+
+    private static func billingCheckoutURL(origin: URL, callbackScheme: String) -> URL {
+        var components = URLComponents(
+            url: origin.appendingPathComponent("api/billing/checkout"),
+            resolvingAgainstBaseURL: false
+        )!
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll { $0.name == "cmux_external_browser" }
+        queryItems.removeAll { $0.name == "cmux_scheme" }
+        queryItems.append(URLQueryItem(name: "cmux_external_browser", value: "1"))
+        queryItems.append(URLQueryItem(name: "cmux_scheme", value: callbackScheme))
+        components.queryItems = queryItems
+        return components.url!
     }
 
     private static func resolvedCmuxPort(environment: [String: String]) -> String {
@@ -340,6 +503,15 @@ enum AuthEnvironment {
             return url
         }
         return URL(string: fallback)!
+    }
+
+    private static func environmentURL(_ key: String, environment: [String: String]) -> URL? {
+        guard let raw = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty
+        else {
+            return nil
+        }
+        return URL(string: raw)
     }
 
     private static func canonicalizedLoopbackURL(_ url: URL) -> URL {

@@ -1,15 +1,13 @@
 import CMUXMobileCore
 import CmuxMobileAnalytics
+import CmuxMobileCrashReporting
+import CmuxMobileDiagnostics
 import CmuxMobileShellModel
 import CmuxMobileSupport
 import CmuxMobileTransport
 import Foundation
 import SwiftUI
 import cmuxFeature
-
-#if DEBUG
-import CmuxMobileDiagnostics
-#endif
 
 /// Holds the de-singletonized graph the `cmuxApp` builds once at launch.
 ///
@@ -21,8 +19,10 @@ import CmuxMobileDiagnostics
 final class AppCompositionRoot {
     let runtime: CMUXMobileRuntime
     let auth: MobileAuthComposition
+    let iroh: MobileIrohRuntimeComposition
     let reachability: any ReachabilityProviding
     let pushCoordinator: MobilePushCoordinator
+    let signOutHook: MobileSignOutHook
     let analytics: MobileAnalyticsComposition
     let displaySettings: MobileDisplaySettings
     /// First-run onboarding "seen" flag, persisted to `UserDefaults.standard`.
@@ -34,32 +34,73 @@ final class AppCompositionRoot {
     /// observing port, injected down so pairing and disconnected surfaces can
     /// explain a Tailscale-off phone.
     let tailscaleStatusMonitor: TailscaleStatusMonitorAdapter
+    /// Owns the crash reporter's consent-revocation observation for the life
+    /// of the process (closes Sentry + purges its stores if telemetry is
+    /// turned off mid-session).
+    let crashRevocationWatcher = MobileCrashReporter.RevocationWatcher()
 
-    #if DEBUG
-    /// The structured diagnostic log, built once here and injected into the
-    /// shell store. DEBUG-only: it backs the DEV dogfood feedback round-trip and
-    /// is not present in release builds. Its export header is stamped with the
-    /// same build identity as the string debug log so a submitted bundle proves
-    /// which reload it came from.
+    /// The bounded, structured connection log shared by the Iroh runtime and
+    /// mobile shell. It is present in release builds, but its schema accepts
+    /// only fixed categories and integer magnitudes, never terminal contents,
+    /// credentials, peer identities, addresses, or free-form errors.
     let diagnosticLog: DiagnosticLog
-    #endif
 
     init(
         runtime: CMUXMobileRuntime,
         auth: MobileAuthComposition,
-        reachability: any ReachabilityProviding
+        iroh: MobileIrohRuntimeComposition,
+        reachability: any ReachabilityProviding,
+        diagnosticLog: DiagnosticLog
     ) {
+        #if DEBUG
+        // Arm the durable debug log at launch: `.shared` is lazy, and without
+        // this a run that never logs would create no file or crash capture.
+        MobileDebugLog.shared.append("app launch · composition root initialized")
+        #endif
+
         self.runtime = runtime
         self.auth = auth
+        self.iroh = iroh
         self.reachability = reachability
+        self.diagnosticLog = diagnosticLog
+        let telemetryConsent = UserDefaultsAnalyticsConsentProvider(defaults: .standard)
+        if Self.crashReportingEnabled {
+            MobileCrashReporter().startIfEnabled(
+                consent: telemetryConsent,
+                revocationWatcher: crashRevocationWatcher
+            )
+        }
         self.analytics = MobileAnalyticsComposition(
             apiBaseURL: auth.config.apiBaseURL,
-            tokenProvider: auth.coordinator
+            tokenProvider: auth.coordinator,
+            consent: telemetryConsent
         )
-        self.pushCoordinator = MobilePushCoordinator(
+        let pushCoordinator = MobilePushCoordinator(
             registration: auth.pushRegistration,
             analytics: analytics.emitter
         )
+        self.pushCoordinator = pushCoordinator
+        self.signOutHook = MobileSignOutHook {
+            let preparation = iroh.beginSignOutPreparation()
+            return { accessToken, refreshToken in
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        await pushCoordinator.unregisterFromServer(
+                            accessToken: accessToken,
+                            refreshToken: refreshToken
+                        )
+                    }
+                    group.addTask {
+                        await iroh.completeSignOutAfterAuthClear(
+                            preparation,
+                            accessToken: accessToken,
+                            refreshToken: refreshToken
+                        )
+                    }
+                }
+                await diagnosticLog.clear()
+            }
+        }
         self.displaySettings = MobileDisplaySettings()
         // Skip the one-time onboarding when a UI-test mock harness
         // (`CMUX_UITEST_MOCK_DATA`/XCUITest) or a dogfood auto-pair attach URL is
@@ -74,9 +115,27 @@ final class AppCompositionRoot {
             forceSeen: bypassOnboarding
         )
         self.tailscaleStatusMonitor = TailscaleStatusMonitorAdapter(monitor: TailscaleStatusMonitor())
-        #if DEBUG
-        self.diagnosticLog = DiagnosticLog(buildStamp: MobileDebugLog.buildStamp)
-        #endif
+    }
+
+    /// Bundle-owned build identity used in explicit diagnostic exports.
+    /// Values come only from signed app metadata, never user input.
+    static var diagnosticBuildStamp: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let name = info["CFBundleName"] as? String ?? "cmux"
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        return "\(name) \(version) (\(build))"
+    }
+
+    private static var crashReportingEnabled: Bool {
+        switch Bundle.main.object(forInfoDictionaryKey: "CMUXCrashReportingEnabled") {
+        case let enabled as Bool:
+            enabled
+        case let enabled as String:
+            enabled.caseInsensitiveCompare("NO") != .orderedSame
+        default:
+            true
+        }
     }
 
     /// The most recent scene phase, so a `.active` transition is classified as a
@@ -101,6 +160,7 @@ final class AppCompositionRoot {
         let emitter = analytics.emitter
         switch phase {
         case .active:
+            iroh.didBecomeActive()
             let now = Date()
             let decision = analytics.sessionizer.resolveForeground(
                 now: now,
@@ -124,6 +184,7 @@ final class AppCompositionRoot {
             emitter.capture("ios_app_foregrounded", foregroundProps)
             hasForegrounded = true
         case .background:
+            iroh.didEnterBackground()
             let now = Date()
             analytics.sessionStore.recordBackgrounded(at: now)
             emitter.capture("ios_app_backgrounded", [:])

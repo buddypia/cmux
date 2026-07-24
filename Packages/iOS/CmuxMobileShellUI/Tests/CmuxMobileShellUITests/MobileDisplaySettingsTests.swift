@@ -20,6 +20,60 @@ import Testing
         #expect(defaults.object(forKey: "cmux.mobile.workspacePreviewLineCount") == nil)
     }
 
+    @Test func showAltScreenNoticeDefaultsToTrueWithoutAWrite() throws {
+        let defaults = try makeDefaults("altScreenNoticeDefaults")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        #expect(settings.showAltScreenNotice)
+        #expect(defaults.object(forKey: "cmux.mobile.showAltScreenNotice") == nil)
+    }
+
+    @Test func showAltScreenNoticePersistsFalseAcrossInstances() throws {
+        let defaults = try makeDefaults("altScreenNoticePersistsFalse")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        settings.showAltScreenNotice = false
+        #expect(MobileDisplaySettings(defaults: defaults).showAltScreenNotice == false)
+    }
+
+    @Test func showAltScreenNoticePersistsTrueAcrossInstances() throws {
+        let defaults = try makeDefaults("altScreenNoticePersistsTrue")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        settings.showAltScreenNotice = false
+        settings.showAltScreenNotice = true
+        #expect(MobileDisplaySettings(defaults: defaults).showAltScreenNotice)
+    }
+
+    @Test func showMissingFilesDefaultsToFalseWithoutAWrite() throws {
+        let defaults = try makeDefaults("showMissingFilesDefaults")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        #expect(!settings.showMissingFiles)
+        #expect(defaults.object(forKey: "cmux.mobile.showMissingFiles") == nil)
+    }
+
+    @Test func showMissingFilesPersistsAcrossInstances() throws {
+        let defaults = try makeDefaults("showMissingFilesPersists")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        settings.showMissingFiles = true
+        #expect(MobileDisplaySettings(defaults: defaults).showMissingFiles)
+        settings.showMissingFiles = false
+        #expect(!MobileDisplaySettings(defaults: defaults).showMissingFiles)
+    }
+
+    @Test func terminalFilesChipDefaultsToFalseWithoutAWrite() throws {
+        let defaults = try makeDefaults("terminalFilesChipDefaults")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        #expect(!settings.terminalFilesChipEnabled)
+        #expect(defaults.object(forKey: "cmux.mobile.terminalFilesChipEnabled") == nil)
+    }
+
+    @Test func terminalFilesChipPersistsAcrossInstances() throws {
+        let defaults = try makeDefaults("terminalFilesChipPersists")
+        let settings = MobileDisplaySettings(defaults: defaults)
+        settings.terminalFilesChipEnabled = true
+        #expect(MobileDisplaySettings(defaults: defaults).terminalFilesChipEnabled)
+        settings.terminalFilesChipEnabled = false
+        #expect(!MobileDisplaySettings(defaults: defaults).terminalFilesChipEnabled)
+    }
+
     @Test func previewLineCountPersistsAcrossInstances() throws {
         let defaults = try makeDefaults("persists")
         let settings = MobileDisplaySettings(defaults: defaults)

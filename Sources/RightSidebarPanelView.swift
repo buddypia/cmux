@@ -1,7 +1,7 @@
 import AppKit
 import Bonsplit
 import CMUXAgentLaunch
-import CmuxAgentChat
+import CmuxAppKitSupportUI
 import CmuxFoundation
 import CmuxSettings
 import CmuxSettingsUI
@@ -13,11 +13,10 @@ private func rightSidebarDebugResponder(_ responder: NSResponder?) -> String {
 }
 
 /// Mode shown in the right sidebar (the panel toggled by ⌘⌥B).
-nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
+enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
     case files
     case find
     case sessions
-    case transcript
     case feed
     case dock
     case customSidebar = "custom-sidebar"
@@ -27,7 +26,6 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return String(localized: "rightSidebar.mode.files", defaultValue: "Files")
         case .find: return String(localized: "rightSidebar.mode.find", defaultValue: "Find")
         case .sessions: return String(localized: "rightSidebar.mode.sessions", defaultValue: "Vault")
-        case .transcript: return String(localized: "rightSidebar.mode.transcript", defaultValue: "Transcript")
         case .feed: return String(localized: "rightSidebar.mode.feed", defaultValue: "Feed")
         case .dock: return String(localized: "rightSidebar.mode.dock", defaultValue: "Dock")
         case .customSidebar: return String(localized: "rightSidebar.mode.customSidebar", defaultValue: "Custom")
@@ -39,7 +37,6 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return "folder"
         case .find: return "magnifyingglass"
         case .sessions: return "books.vertical"
-        case .transcript: return "text.bubble"
         case .feed: return "dot.radiowaves.left.and.right"
         case .dock: return "dock.rectangle"
         case .customSidebar: return "wand.and.stars"
@@ -51,7 +48,6 @@ nonisolated enum RightSidebarMode: String, CaseIterable, Codable, Sendable {
         case .files: return .switchRightSidebarToFiles
         case .find: return .switchRightSidebarToFind
         case .sessions: return .switchRightSidebarToSessions
-        case .transcript: return nil
         case .feed: return .switchRightSidebarToFeed
         case .dock: return .switchRightSidebarToDock
         case .customSidebar: return nil
@@ -67,32 +63,21 @@ extension RightSidebarMode {
     }
 }
 
-nonisolated enum RightSidebarContentMountPolicy {
+enum RightSidebarContentMountPolicy {
     static func shouldMountContent(isRightSidebarVisible: Bool, hasMountedContent: Bool) -> Bool {
         isRightSidebarVisible || hasMountedContent
     }
 }
 
-nonisolated enum FileExplorerRootSyncPolicy {
+enum FileExplorerRootSyncPolicy {
     static func shouldSyncFileExplorerStore(isRightSidebarVisible: Bool, mode: RightSidebarMode) -> Bool {
         guard isRightSidebarVisible else { return false }
         switch mode {
         case .files, .find:
             return true
-        case .sessions, .transcript, .feed, .dock, .customSidebar:
+        case .sessions, .feed, .dock, .customSidebar:
             return false
         }
-    }
-}
-
-nonisolated enum RightSidebarDirectoryContext {
-    static func normalizedDirectory(_ directory: String?) -> String? {
-        let trimmed = directory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    static func dockRootDirectory(workspaceDirectory: String?, fallbackDirectory: String?) -> String? {
-        normalizedDirectory(workspaceDirectory) ?? normalizedDirectory(fallbackDirectory)
     }
 }
 
@@ -126,6 +111,7 @@ struct RightSidebarPanelView: View {
     @ObservedObject var fileExplorerState: FileExplorerState
     @ObservedObject var sessionIndexStore: SessionIndexStore
     let titlebarHeight: CGFloat
+    let windowAppearance: WindowAppearanceSnapshot
     let workspaceId: UUID?
     let onResumeSession: ((SessionEntry) -> Void)?
     let onOpenFilePreview: (String) -> Void
@@ -138,7 +124,6 @@ struct RightSidebarPanelView: View {
     }
     @State private var focusShortcutHintMonitor = WindowScopedShortcutHintModifierMonitor(activation: .commandOnly)
     @State private var closeShortcutHintMonitor = WindowScopedShortcutHintModifierMonitor(activation: .commandOnly)
-    @StateObject private var dockStore = DockControlsStore()
     @State private var hasMountedRightSidebarContent = false
     @ObservedObject private var keyboardShortcutSettingsObserver = KeyboardShortcutSettingsObserver.shared
     private let alwaysShowShortcutHints = ShortcutHintDebugSettings().alwaysShowHints
@@ -214,27 +199,15 @@ struct RightSidebarPanelView: View {
             startShortcutHintMonitorsIfNeeded()
             if fileExplorerState.isVisible { hasMountedRightSidebarContent = true }
             fileExplorerState.refreshModeAvailability()
-            synchronizeDockLifecycle()
         }
         .onDisappear {
             stopShortcutHintMonitors()
-            synchronizeDockLifecycle(isRightSidebarVisible: false)
         }
         .onChange(of: showModifierHoldHints) { _, _ in
             startShortcutHintMonitorsIfNeeded()
         }
-        .onChange(of: fileExplorerState.mode) { _, mode in
-            synchronizeDockLifecycle(mode: mode)
-        }
         .onChange(of: fileExplorerState.isVisible) { _, visible in
             if visible { hasMountedRightSidebarContent = true }
-            synchronizeDockLifecycle(isRightSidebarVisible: visible)
-        }
-        .onChange(of: dockRootDirectory) { _, newValue in
-            synchronizeDockLifecycle(rootDirectory: newValue, workspaceId: workspaceId)
-        }
-        .onChange(of: workspaceId) { _, newValue in
-            synchronizeDockLifecycle(rootDirectory: dockRootDirectory, workspaceId: newValue)
         }
         .onChange(of: feedEnabled) { _, _ in refreshModeAvailabilityAndFocusIfNeeded() }
         .onChange(of: dockEnabled) { _, _ in refreshModeAvailabilityAndFocusIfNeeded() }
@@ -424,12 +397,10 @@ struct RightSidebarPanelView: View {
                     .onAppear {
                         sessionIndexStore.setCurrentDirectoryIfChanged(sessionIndexDirectory)
                     }
-            case .transcript:
-                agentTranscriptContent
             case .feed:
                 FeedPanelView()
             case .dock:
-                DockPanelView(rootDirectory: dockRootDirectory, workspaceId: workspaceId, store: dockStore)
+                dockPanel(windowAppearance: windowAppearance)
             case .customSidebar:
                 EmptyView()
             }
@@ -438,71 +409,27 @@ struct RightSidebarPanelView: View {
         }
     }
 
-    /// The live agent transcript for the focused terminal's session, resolved
-    /// from the session registry. Follows focus: re-resolves whenever
-    /// `tabManager` publishes a focus change, and `.id(sessionID)` rebuilds the
-    /// conversation store when the bound session changes.
-    @ViewBuilder
-    private var agentTranscriptContent: some View {
-        if let tabId = workspaceId,
-           let surfaceId = tabManager.focusedSurfaceId(for: tabId),
-           let service = TerminalController.shared.agentChatTranscriptService,
-           let record = service.registry.liveSession(surfaceID: surfaceId.uuidString) {
-            DesktopAgentTranscriptView(
-                descriptor: record.descriptor,
-                source: DesktopChatEventSource(service: service)
-            )
-            .id(record.sessionID)
-        } else {
-            agentTranscriptEmptyState
-        }
-    }
-
-    private var agentTranscriptEmptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "text.bubble")
-                .font(.system(size: 26))
-                .foregroundStyle(.tertiary)
-            Text(String(localized: "rightSidebar.transcript.empty", defaultValue: "No active agent session"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(
-                String(
-                    localized: "rightSidebar.transcript.empty.hint",
-                    defaultValue: "Focus a terminal running Claude, Codex, or Antigravity."
-                )
-            )
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-            .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
-    }
-
     private var sessionIndexDirectory: String? {
         sessionIndexStore.currentDirectory
     }
 
-    private var dockRootDirectory: String? {
-        RightSidebarDirectoryContext.dockRootDirectory(
-            workspaceDirectory: tabManager.selectedWorkspace?.currentDirectory,
-            fallbackDirectory: sessionIndexStore.currentDirectory
-        )
-    }
-
-    private func synchronizeDockLifecycle(
-        isRightSidebarVisible: Bool? = nil,
-        mode: RightSidebarMode? = nil,
-        rootDirectory: String? = nil,
-        workspaceId: UUID? = nil
-    ) {
-        dockStore.synchronizeSidebarLifecycle(
-            isRightSidebarVisible: isRightSidebarVisible ?? fileExplorerState.isVisible,
-            mode: mode ?? fileExplorerState.mode,
-            rootDirectory: rootDirectory ?? dockRootDirectory,
-            workspaceId: workspaceId ?? self.workspaceId
-        )
+    /// Renders this window's own Dock (created lazily on first show); no
+    /// window ever defers to a Dock rendered elsewhere.
+    @ViewBuilder
+    private func dockPanel(windowAppearance: WindowAppearanceSnapshot) -> some View {
+        if let app = AppDelegate.shared, let dock = app.windowDock(for: tabManager) {
+            DockPanelView(
+                store: dock,
+                isSidebarVisible: fileExplorerState.isVisible,
+                mode: fileExplorerState.mode,
+                rootDirectory: nil,
+                windowAppearance: windowAppearance,
+                rightSidebarOwnsInputFocus: fileExplorerState.rightSidebarOwnsInputFocus
+            )
+            .id("dock.window.\(dock.workspaceId.uuidString)")
+        } else {
+            Color.clear
+        }
     }
 
     private func selectMode(_ mode: RightSidebarMode) {
@@ -519,9 +446,8 @@ struct RightSidebarPanelView: View {
         let previousMode = fileExplorerState.mode
         fileExplorerState.refreshModeAvailability()
         let mode = fileExplorerState.mode
-        if previousMode == mode {
-            synchronizeDockLifecycle(mode: mode)
-        }
+        // The Dock manages its own lifecycle from DockPanelView, so no dock sync
+        // is needed here when the mode is unchanged.
         guard previousMode != mode,
               fileExplorerState.isVisible,
               let window = NSApp.keyWindow ?? NSApp.mainWindow

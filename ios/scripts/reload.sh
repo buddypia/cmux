@@ -18,6 +18,15 @@ the tagged Mac app. Opt out granularly:
   --no-attach    sign in, but do not auto-pair to the Mac
   --no-setup     plain install + launch (today's behavior)
 
+  --prod-auth    sign this DEV build in against PRODUCTION auth (bakes
+                 CMUXAuthEnvironment=production into Info.plist; the presence
+                 worker and API base follow the channel in-app). This does not
+                 change build compatibility: the DEV iOS app still connects
+                 only to the Mac DEV build with the same tag. Implies
+                 --no-sign-in (dogfood auto-login creds are dev-channel);
+                 sign in in-app with your real account and use the IN-APP
+                 scanner.
+
 Device signing uses the local Xcode account, or App Store Connect API
 credentials from ASC_API_KEY_ID, ASC_API_ISSUER_ID, ASC_API_KEY_PATH, or
 ios/Config/AppStoreConnect.local.plist. Set IOS_DEVELOPMENT_TEAM or pass
@@ -56,6 +65,15 @@ ALLOW_DEVICE_REGISTRATION=0
 NO_SIGN_IN=0
 NO_ATTACH=0
 NO_SETUP=0
+# Disable AArch64 GlobalISel codegen for this build. Xcode 26's Swift frontend
+# can miscompile under -O/wholemodule on the GlobalISel path, surfacing as bogus
+# "undefined symbol: _abort/_free/..." link failures. Mirrors scripts/reload.sh.
+# Also honored via CMUX_SWIFT_FRONTEND_WORKAROUND=1.
+SWIFT_FRONTEND_WORKAROUND="${CMUX_SWIFT_FRONTEND_WORKAROUND:-0}"
+# --prod-auth: bake CMUXAuthEnvironment=production so the dev build signs in
+# against the production Stack project. Build compatibility remains exact-tag
+# DEV to DEV.
+PROD_AUTH=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -119,6 +137,14 @@ while [[ $# -gt 0 ]]; do
       NO_SETUP=1
       shift
       ;;
+    --swift-frontend-workaround|--swift-workaround)
+      SWIFT_FRONTEND_WORKAROUND=1
+      shift
+      ;;
+    --prod-auth)
+      PROD_AUTH=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -149,6 +175,83 @@ if [[ "$ALLOW_DEVICE_REGISTRATION" -eq 1 && "$ALLOW_PROVISIONING_UPDATES" -eq 0 
   exit 1
 fi
 
+# Extra xcodebuild settings to disable AArch64 GlobalISel when the workaround is
+# requested. Expanded into the build invocations via the empty-array-safe idiom
+# ${arr[@]+"${arr[@]}"} so it is a no-op (and set -u safe) when disabled.
+SWIFT_WORKAROUND_ARGS=()
+if [[ "$SWIFT_FRONTEND_WORKAROUND" == "1" ]]; then
+  echo "==> Swift frontend workaround enabled (AArch64 GlobalISel disabled)"
+  SWIFT_WORKAROUND_ARGS=(
+    SWIFT_ENABLE_BATCH_MODE=NO
+    DEBUG_INFORMATION_FORMAT=
+    GCC_GENERATE_DEBUGGING_SYMBOLS=NO
+    'OTHER_SWIFT_FLAGS=$(inherited) -Xllvm -aarch64-enable-global-isel-at-O=-1'
+  )
+fi
+
+# --prod-auth: point the build at the production auth channel for production
+# account, registry, and API testing (https://github.com/manaflow-ai/cmux/issues/7145).
+# The value lands in the CMUXAuthEnvironment Info.plist key (a tapped device
+# build sees no shell env), read by MobileAuthComposition. Presence needs no
+# URL here: PresenceClient.resolvedServiceBaseURL follows the resolved auth
+# channel, so the worker URLs live only in Swift and cannot drift; an explicit
+# CMUX_PRESENCE_BASE_URL still wins as before.
+CMUX_IOS_AUTH_ENV_VALUE=""
+if [[ "$PROD_AUTH" -eq 1 ]]; then
+  CMUX_IOS_AUTH_ENV_VALUE="production"
+  # The dogfood auto-login creds are dev-Stack-project accounts; against
+  # production auth they cannot sign in. Launch plain and sign in in-app with
+  # the same account as the Mac you want to pair with.
+  if [[ "$NO_SETUP" -eq 0 && "$NO_SIGN_IN" -eq 0 ]]; then
+    echo "==> --prod-auth: skipping auto sign-in/auto-pair (dogfood creds are dev-channel); sign in in the app"
+    NO_SIGN_IN=1
+  fi
+fi
+
+# Bake service origins because a launched iOS app does not inherit the tagged
+# macOS process environment. A Simulator can reach the matching tag's localhost
+# server. A physical device cannot: localhost is the phone itself, so Debug
+# device builds use staging unless the caller supplies a reachable override.
+# Production-auth builds retain production origins. Explicit overrides always
+# win, including the shared CMUX_DEV_API_BASE_URL used by tagged Mac builds.
+cmux_ios_resolve_api_base_url() {
+  local target="$1"
+  local explicit_base_url="${CMUX_IOS_API_BASE_URL:-${CMUX_DEV_API_BASE_URL:-}}"
+
+  if [[ -n "$explicit_base_url" ]]; then
+    printf '%s' "$explicit_base_url"
+  elif [[ "$PROD_AUTH" -eq 1 ]]; then
+    printf '%s' "https://cmux.com"
+  elif [[ -n "${CMUX_VM_API_BASE_URL:-}" ]]; then
+    printf '%s' "$CMUX_VM_API_BASE_URL"
+  elif [[ "$target" == "physical_device" ]]; then
+    printf '%s' "https://cmux-staging.vercel.app"
+  elif [[ "${CMUX_PORT:-}" =~ ^[0-9]+$ ]] \
+      && (( 10#$CMUX_PORT >= 1 && 10#$CMUX_PORT <= 65535 )); then
+    printf 'http://localhost:%d' "$((10#$CMUX_PORT))"
+  else
+    printf '%s' "http://localhost:3000"
+  fi
+}
+
+# Iroh discovery and grants always use one shared broker. This is staging for
+# Debug builds on both targets and production for --prod-auth builds.
+cmux_ios_resolve_iroh_broker_base_url() {
+  local explicit_base_url="${CMUX_IOS_IROH_BROKER_BASE_URL:-${CMUX_IROH_BROKER_BASE_URL:-}}"
+
+  if [[ -n "$explicit_base_url" ]]; then
+    printf '%s' "$explicit_base_url"
+  elif [[ "$PROD_AUTH" -eq 1 ]]; then
+    printf '%s' "https://cmux.com"
+  else
+    printf '%s' "https://cmux-staging.vercel.app"
+  fi
+}
+
+CMUX_IOS_SIMULATOR_API_BASE_URL_VALUE="$(cmux_ios_resolve_api_base_url simulator)"
+CMUX_IOS_DEVICE_API_BASE_URL_VALUE="$(cmux_ios_resolve_api_base_url physical_device)"
+CMUX_IOS_IROH_BROKER_BASE_URL_VALUE="$(cmux_ios_resolve_iroh_broker_base_url)"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Shared tag/identity + attach helpers; sanitize_tag() above delegates here so the
@@ -156,10 +259,9 @@ IOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # sanitize_tag call below.
 # shellcheck source=../../scripts/lib/mobile-attach.sh
 source "$IOS_DIR/../scripts/lib/mobile-attach.sh"
-# Fail closed on tags with no alphanumerics (their slug collapses onto the shared
-# fallback identity), matching the macOS reload's reject-empty behavior.
-if ! cmux_attach_tag_has_alnum "$TAG"; then
-  echo "error: --tag '$TAG' has no letters or digits; pick a tag with at least one alphanumeric character" >&2
+# Fail before building if the tag would collide with a fallback/reserved identity
+# or exceed the cloud presence limit.
+if ! cmux_attach_validate_dev_tag "$TAG"; then
   exit 1
 fi
 WORKSPACE="$IOS_DIR/cmux.xcworkspace"
@@ -468,11 +570,15 @@ reload_simulator() {
     CMUX_GIT_SHA="$GIT_SHA" \
     CMUX_DEV_TAG="$TAG" \
     CMUX_PRESENCE_BASE_URL="${CMUX_PRESENCE_BASE_URL:-}" \
+    CMUX_IOS_AUTH_ENV="$CMUX_IOS_AUTH_ENV_VALUE" \
+    CMUX_API_BASE_URL="$CMUX_IOS_SIMULATOR_API_BASE_URL_VALUE" \
+    CMUX_IROH_BROKER_BASE_URL="$CMUX_IOS_IROH_BROKER_BASE_URL_VALUE" \
     EXCLUDED_SOURCE_FILE_NAMES=Info.plist \
     CODE_SIGNING_ALLOWED=NO \
     SWIFT_OPTIMIZATION_LEVEL=-O \
     SWIFT_COMPILATION_MODE=wholemodule \
     GCC_OPTIMIZATION_LEVEL=s \
+    ${SWIFT_WORKAROUND_ARGS[@]+"${SWIFT_WORKAROUND_ARGS[@]}"} \
     build
 
   APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/cmux.app"
@@ -507,8 +613,9 @@ PY
     if [[ "$NO_SETUP" -eq 1 || "$NO_SIGN_IN" -eq 1 ]]; then
       xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" >/dev/null
     elif ! auto_setup_launch simulator "$SIM_ID"; then
-      echo "warning: signed launch failed; launching plain (sign in manually)" >&2
-      xcrun simctl launch "$SIM_ID" "$BUNDLE_ID" >/dev/null
+      echo "error: installed $BUNDLE_ID, but signed setup failed; refusing an unpaired fallback launch" >&2
+      echo "error: repair the tagged Mac/Iroh route, or pass --no-attach, --no-sign-in, or --no-setup explicitly" >&2
+      return 1
     fi
   fi
 
@@ -521,6 +628,13 @@ Bundle id:
 Simulator:
   $SIMULATOR_NAME ($SIM_ID)
 EOF
+  if [[ "$PROD_AUTH" -eq 1 ]]; then
+    cat <<EOF
+Auth environment:
+  production (--prod-auth): sign in in-app with your real account, then pair
+  with the Mac DEV build that has tag $TAG.
+EOF
+  fi
 }
 
 reload_device() {
@@ -575,6 +689,9 @@ reload_device() {
     CMUX_GIT_SHA="$GIT_SHA"
     CMUX_DEV_TAG="$TAG"
     CMUX_PRESENCE_BASE_URL="${CMUX_PRESENCE_BASE_URL:-}"
+    CMUX_IOS_AUTH_ENV="$CMUX_IOS_AUTH_ENV_VALUE"
+    CMUX_API_BASE_URL="$CMUX_IOS_DEVICE_API_BASE_URL_VALUE"
+    CMUX_IROH_BROKER_BASE_URL="$CMUX_IOS_IROH_BROKER_BASE_URL_VALUE"
     EXCLUDED_SOURCE_FILE_NAMES=Info.plist
     CODE_SIGNING_ALLOWED=YES
     CODE_SIGN_STYLE=Automatic
@@ -584,6 +701,10 @@ reload_device() {
     SWIFT_COMPILATION_MODE=wholemodule
     GCC_OPTIMIZATION_LEVEL=s
   )
+
+  if [[ "${#SWIFT_WORKAROUND_ARGS[@]}" -gt 0 ]]; then
+    build_args+=("${SWIFT_WORKAROUND_ARGS[@]}")
+  fi
 
   if [[ -n "$DEVELOPMENT_TEAM" ]]; then
     build_args+=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
@@ -615,13 +736,12 @@ reload_device() {
         echo "warning: installed but could not launch $BUNDLE_ID (device locked? unlock the iPhone and tap the app)" >&2
       fi
     elif ! auto_setup_launch device "$selected_device_install_id"; then
-      # Auto sign-in/pair failed (e.g. missing dogfood creds, helper, or Mac).
-      # Fall back to a plain launch so the freshly installed app still opens,
-      # matching the simulator path and the previous device behavior.
-      echo "warning: signed launch failed; launching plain (sign in manually)" >&2
-      if ! xcrun devicectl device process launch --terminate-existing --device "$selected_device_install_id" "$BUNDLE_ID" >/dev/null 2>&1; then
-        echo "warning: installed but could not launch $BUNDLE_ID (device locked? unlock the iPhone and tap the app)" >&2
-      fi
+      # A plain fallback can reuse stale pairing state and look dogfood-ready
+      # while the matching tagged Iroh route is absent. Fail closed unless the
+      # caller explicitly requested a plain launch above.
+      echo "error: installed $BUNDLE_ID, but signed setup failed; refusing an unpaired fallback launch" >&2
+      echo "error: repair the tagged Mac/Iroh route, or pass --no-attach, --no-sign-in, or --no-setup explicitly" >&2
+      return 1
     fi
   fi
 
@@ -634,6 +754,13 @@ Bundle id:
 Device:
   $selected_device_name ($selected_device_id)
 EOF
+  if [[ "$PROD_AUTH" -eq 1 ]]; then
+    cat <<EOF
+Auth environment:
+  production (--prod-auth): sign in in-app with your real account, then pair
+  with the Mac DEV build that has tag $TAG.
+EOF
+  fi
 }
 
 echo "==> iOS reload starting (tag: $TAG)"

@@ -37,11 +37,18 @@ Values for `shortcuts.bindings.<action>`:
 - `shortcuts.bindings.renameWorkspace`
 - `shortcuts.bindings.editWorkspaceDescription`
 - `shortcuts.bindings.closeWorkspace`
+- `shortcuts.bindings.newWorkspaceGroup`
+- `shortcuts.bindings.groupSelectedWorkspaces`
+- `shortcuts.bindings.toggleFocusedWorkspaceGroupCollapsed`
+- `shortcuts.bindings.moveWorkspaceUp`
+- `shortcuts.bindings.moveWorkspaceDown`
 
 ## Panes and surfaces
 
 - `shortcuts.bindings.nextSurface`
 - `shortcuts.bindings.prevSurface`
+- `shortcuts.bindings.moveSurfaceLeft`
+- `shortcuts.bindings.moveSurfaceRight`
 - `shortcuts.bindings.selectSurfaceByNumber`
 - `shortcuts.bindings.newSurface`
 - `shortcuts.bindings.toggleTerminalCopyMode`
