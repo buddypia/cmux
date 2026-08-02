@@ -162,23 +162,6 @@ public final class DefaultsValueModel<Value: SettingCodable> {
         return source
     }
 
-    /// Persists the value, then runs `afterCommit` after storage accepts it.
-    ///
-    /// Use this when a setting has host-side live-update work that must observe
-    /// the committed defaults value. The write still goes through the injected
-    /// ``UserDefaultsSettingsStore`` instead of assuming `UserDefaults.standard`.
-    ///
-    /// - Parameters:
-    ///   - value: The new value to persist.
-    ///   - afterCommit: Main-actor work to run after ``UserDefaultsSettingsStore``
-    ///     has completed the write.
-    public func set(_ value: Value, afterCommit: @escaping @MainActor @Sendable () -> Void) {
-        current = value
-        Task { [store, key, afterCommit] in
-            await store.set(value, for: key)
-            await afterCommit()
-        }
-    }
 
     /// Updates ``current`` after another owner has already persisted `value`.
     ///

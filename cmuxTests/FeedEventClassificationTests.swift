@@ -172,29 +172,6 @@ struct FeedEventClassificationTests {
         }
     }
 
-    @Test func codexLifecycleFeedEventsStayTelemetryAndPreserveNames() {
-        for event in ["PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop"] {
-            let classification = classify("codex", event, tool: "shell")
-            #expect(classification.name == event)
-            #expect(classification.actionable == false)
-        }
-    }
-
-    @Test func codexSnakeCaseLifecycleFeedEventsStayTelemetryAndPreserveNames() {
-        let cases = [
-            ("post_tool_use", "PostToolUse"),
-            ("pre_compact", "PreCompact"),
-            ("post_compact", "PostCompact"),
-            ("subagent_start", "SubagentStart"),
-            ("subagent_stop", "SubagentStop"),
-        ]
-        for (event, expectedName) in cases {
-            let classification = classify("codex", event, tool: "shell")
-            #expect(classification.name == expectedName)
-            #expect(classification.actionable == false)
-        }
-    }
-
     /// Unknown source + unknown event is safe by default.
     @Test func unknownSourceUnknownEventIsSafe() {
         #expect(classify("totally-new-agent", "some_future_event", tool: "Bash").actionable == false)

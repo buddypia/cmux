@@ -57,9 +57,22 @@ struct AgentChatSessionRecord: Sendable {
         if id != sessionID { hookStoreSessionID = id }
     }
 
-    mutating func setHookLifecycleState(_ nextState: ChatAgentState) {
+    /// When the last hook event moved `state`. Transcript-derived transitions
+    /// only overrule a hook decision that is strictly older than the transcript
+    /// row they came from, so a fully hooked agent keeps hook semantics while a
+    /// half-installed or hook-less one still tracks its own log.
+    var lastHookEventAt: Date?
+
+    mutating func setHookLifecycleState(_ nextState: ChatAgentState, at eventAt: Date? = nil) {
         state = nextState
         hasHookLifecycleState = true
+        lastHookEventAt = eventAt ?? lastActivityAt
+    }
+
+    /// Applies a state the transcript proved, without claiming hook authority.
+    mutating func setTranscriptObservedState(_ nextState: ChatAgentState) {
+        state = nextState
+        hasHookLifecycleState = false
     }
 
     mutating func setProcessObservedIdle() {

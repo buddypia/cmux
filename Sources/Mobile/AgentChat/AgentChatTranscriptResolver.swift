@@ -66,7 +66,7 @@ struct AgentChatTranscriptResolver: Sendable {
             return claudeFallbackPath(record: record)
         case .codex:
             return codexFallbackPath(sessionID: record.sessionID)
-        case .other:
+        case .antigravity, .other:
             return nil
         }
     }
@@ -82,7 +82,7 @@ struct AgentChatTranscriptResolver: Sendable {
         switch record.agentKind {
         case .claude:
             return claudeFallbackPath(record: record)
-        case .codex, .other:
+        case .codex, .antigravity, .other:
             return nil
         }
     }

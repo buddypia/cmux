@@ -182,6 +182,10 @@ extension Workspace {
         guard let targetPanelId, panels[targetPanelId] != nil else { return }
         agentLifecycleStatesByPanelId[targetPanelId, default: [:]][key] = lifecycle
         if !AgentHibernationLifecycleStatusKeys.isManualKey(key) {
+            // A live agent now owns this surface, so the status restored from
+            // the previous session stops being the answer. Manual workspace
+            // loaders are not agents and must not retire it.
+            sidebarAgentRuntimeObservation.clearRestoredAgentStatus(panelId: targetPanelId)
             recordAgentLifecycleChange(panelId: targetPanelId)
         }
     }
@@ -263,5 +267,22 @@ extension Workspace {
             workspaceId: id,
             panelId: panelId
         )
+        refreshAgentStatusTabTitle(panelId: panelId)
+    }
+
+    /// Repaints the surface tab after its agent status marker changed.
+    ///
+    /// The lifecycle maps are `@ObservationIgnored`, so nothing re-reads
+    /// ``resolvedPanelTitle(panelId:fallback:)`` on its own; every lifecycle
+    /// mutation lane funnels through `recordAgentLifecycleChange`, which makes
+    /// this the one place the Running/Done marker has to be pushed from.
+    private func refreshAgentStatusTabTitle(panelId: UUID) {
+        guard let tabId = surfaceIdFromPanelId(panelId),
+              let panel = panels[panelId],
+              let existing = bonsplitController.tab(tabId) else { return }
+        let baseTitle = panelTitles[panelId] ?? panel.displayTitle
+        let resolved = resolvedPanelTitle(panelId: panelId, fallback: baseTitle)
+        guard existing.title != resolved else { return }
+        bonsplitController.updateTab(tabId, title: resolved)
     }
 }

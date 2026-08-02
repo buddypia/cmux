@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-xcodebuild -project cmux.xcodeproj -scheme cmux -configuration Release -destination 'platform=macOS' build
+xcodebuild -project cmux.xcodeproj -scheme cmux -configuration Release -destination 'platform=macOS' ENABLE_APP_INTENTS_METADATA_EXTRACTION=NO SWIFT_EMIT_APP_INTENTS_METADATA=NO build
 pkill -x cmux || true
 sleep 0.2
 APP_PATH="$(

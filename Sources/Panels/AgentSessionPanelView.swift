@@ -16,13 +16,8 @@ struct AgentSessionPanelView: View {
     var body: some View {
         Group {
             if isVisibleInUI {
-                AgentSessionWebRenderer(
-                    panel: panel,
-                    isFocused: isFocused,
-                    backgroundColor: appearance.contentBackgroundColor,
-                    theme: AgentSessionWebTheme.resolve(appearance: appearance),
-                    sessionContentWidthPresentation: sessionContentWidthPresentation,
-                    onRequestPanelFocus: onRequestPanelFocus
+                AgentStudioSpriteContainerView(
+                    scene: panel.scene
                 )
                 .id(panel.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

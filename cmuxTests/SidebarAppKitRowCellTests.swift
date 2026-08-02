@@ -8,7 +8,10 @@ import Testing
 @Suite
 @MainActor
 struct SidebarAppKitRowCellTests {
-    private static func makeSnapshot(title: String = "Workspace") -> SidebarWorkspaceSnapshotBuilder.Snapshot {
+    private static func makeSnapshot(
+        title: String = "Workspace",
+        agentStatusGroups: [AgentStatusBadgeGroup] = []
+    ) -> SidebarWorkspaceSnapshotBuilder.Snapshot {
         SidebarWorkspaceSnapshotBuilder.Snapshot(
             presentationKey: SidebarWorkspaceSnapshotFactory.presentationKey(
                 settings: SidebarTabItemSettingsSnapshot(defaults: UserDefaults(suiteName: UUID().uuidString)!),
@@ -29,6 +32,8 @@ struct SidebarAppKitRowCellTests {
             latestLog: nil,
             progress: nil,
             activeCodingAgentCount: 0,
+            agentStatusGroups: agentStatusGroups,
+            latestAgentOutput: nil,
             compactGitBranchSummaryText: nil,
             compactDirectoryCandidates: [],
             compactBranchDirectoryCandidates: [],
@@ -52,14 +57,15 @@ struct SidebarAppKitRowCellTests {
         workspaceId: UUID = UUID(),
         isActive: Bool = false,
         canClose: Bool = true,
-        settings: SidebarTabItemSettingsSnapshot? = nil
+        settings: SidebarTabItemSettingsSnapshot? = nil,
+        snapshot: SidebarWorkspaceSnapshotBuilder.Snapshot? = nil
     ) -> SidebarWorkspaceRowModel {
         let resolvedSettings = settings
             ?? SidebarTabItemSettingsSnapshot(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         return SidebarWorkspaceRowModel(
             workspaceId: workspaceId,
             index: 0,
-            snapshot: makeSnapshot(),
+            snapshot: snapshot ?? makeSnapshot(),
             settings: resolvedSettings,
             isActive: isActive,
             isMultiSelected: false,
@@ -189,6 +195,50 @@ struct SidebarAppKitRowCellTests {
             contextMenuDidClose: {}
         )
         return cell
+    }
+
+    /// A per-CLI pill carries a CLI name, so it can be wider than the row. The
+    /// pill clips its own text but the row does not clip the pill, and the
+    /// wrap rule cannot help the first pill on a line — without a clamp the
+    /// badge paints over the row's trailing edge.
+    @Test(arguments: [120.0, 240.0])
+    func agentStatusPillsNeverPaintPastTheRowTrailingEdge(_ width: CGFloat) {
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [
+            AgentSurfaceStatusSummary(status: .running, agentKey: "antigravity", isRestored: false, lastMessage: nil),
+            AgentSurfaceStatusSummary(status: .done, agentKey: "antigravity", isRestored: false, lastMessage: nil),
+            AgentSurfaceStatusSummary(status: .idle, agentKey: "hermes-agent", isRestored: false, lastMessage: nil),
+        ])
+        let model = Self.makeModel(snapshot: Self.makeSnapshot(agentStatusGroups: groups))
+        let cell = Self.configuredCell(model: model)
+
+        cell.layoutContent(model: model, width: width, apply: true)
+
+        let trailing = width - SidebarWorkspaceListMetrics.rowOuterHorizontalPadding
+            - SidebarWorkspaceListMetrics.rowContentHorizontalPadding
+        let pills = cell.subviews.compactMap { $0 as? SidebarRowAgentStatusPill }.filter { !$0.isHidden }
+        #expect(pills.count == 2)
+        for pill in pills {
+            #expect(pill.frame.maxX <= trailing + 0.5)
+        }
+    }
+
+    /// The strip is the row's answer to "which CLI, in what state" — it must
+    /// draw one pill per CLI, not one merged count.
+    @Test
+    func agentStatusStripDrawsOnePillPerCLI() {
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [
+            AgentSurfaceStatusSummary(status: .running, agentKey: "codex", isRestored: false, lastMessage: nil),
+            AgentSurfaceStatusSummary(status: .done, agentKey: "codex", isRestored: false, lastMessage: nil),
+            AgentSurfaceStatusSummary(status: .idle, agentKey: "claude_code", isRestored: false, lastMessage: nil),
+        ])
+        let model = Self.makeModel(snapshot: Self.makeSnapshot(agentStatusGroups: groups))
+        let cell = Self.configuredCell(model: model)
+
+        let pills = cell.subviews.compactMap { $0 as? SidebarRowAgentStatusPill }.filter { !$0.isHidden }
+        #expect(pills.count == 2)
+        // The tooltip is localized, so assert it names this pill's CLI rather
+        // than pinning English wording that fails on a Japanese machine.
+        #expect(pills.first?.toolTip?.hasPrefix("Codex ") == true)
     }
 
     @Test(arguments: zip(["codex", "claude_code"], ["Running", "Needs input"]))

@@ -395,4 +395,18 @@ extension AppDelegate {
                 manager.tabs.contains(where: { $0.id == tabId })
             }
     }
+
+    /// Returns the `TabManager` that owns `groupId`, if any.
+    func tabManagerFor(groupId: UUID) -> TabManager? {
+        for context in mainWindowContexts.values {
+            if context.tabManager.workspaceGroups.contains(where: { $0.id == groupId }) {
+                return context.tabManager
+            }
+        }
+        return recoverableMainWindowRoutes()
+            .compactMap(\.tabManager)
+            .first { manager in
+                manager.workspaceGroups.contains(where: { $0.id == groupId })
+            }
+    }
 }

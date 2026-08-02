@@ -24,6 +24,8 @@ final class AgentChatTranscriptService {
     /// failures don't rescan the filesystem during tool storms.
     private var failedResolutions: Set<String> = []
     private var endedListability = AgentChatEndedTranscriptListabilityCache()
+    /// The Mac-side live-agent presence sweep (see ``startAgentPresenceSweep()``).
+    private var presenceSweepTask: Task<Void, Never>?
 
     /// Creates the service with a hook-store-backed registry.
     ///
@@ -152,6 +154,36 @@ final class AgentChatTranscriptService {
         // off and return. Live hook events also populate the registry, and the
         // seed converges within milliseconds.
         Task { [weak self] in await self?.registry.seedFromHookStores() }
+        startAgentPresenceSweep()
+    }
+
+    /// How often the Mac re-scans the process table for live agents.
+    ///
+    /// Presence discovery used to be pulled only by a phone listing sessions,
+    /// so a Mac with no phone attached never learned an agent existed unless
+    /// its hooks fired — which is exactly the case a user hits with hooks
+    /// missing or half-installed. The sweep is the Mac's own floor.
+    ///
+    /// 4s trades a slightly later first paint for a scan rate the registry's
+    /// own 2s throttle already tolerates; the scan itself runs off-main.
+    private static let agentPresenceSweepInterval: Duration = .seconds(4)
+
+    /// Keeps the registry's live-agent view fresh without a phone attached.
+    private func startAgentPresenceSweep() {
+        guard presenceSweepTask == nil else { return }
+        presenceSweepTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                // `surfaceIDs: nil` scans everything and honors the registry's
+                // throttle, so an interactive listing sweep already in flight
+                // is reused rather than duplicated.
+                _ = await self.registry.observeAgentProcessesForListing(
+                    surfaceIDs: nil,
+                    waitUpTo: Self.agentPresenceSweepInterval
+                )
+                try? await Task.sleep(for: Self.agentPresenceSweepInterval)
+            }
+        }
     }
 
     /// Ingests one hook event (called from the socket dispatch path).
@@ -167,11 +199,12 @@ final class AgentChatTranscriptService {
         default:
             break
         }
-        // Tail eagerly only while someone is listening, and never for an
-        // ended session (its transcript can no longer grow; recreating the
-        // tailer here would undo the ended-state eviction).
-        if record.state != .ended,
-           MobileHostService.hasEventSubscribers(topic: Self.eventTopic) {
+        // Tail every live session, not just the ones a phone is watching: the
+        // transcript is also the Mac's hook-independent status source (sidebar
+        // spinner, tab-title Running/Done). Never for an ended session — its
+        // transcript can no longer grow, and recreating the tailer here would
+        // undo the ended-state eviction.
+        if record.state != .ended {
             ensureTailer(for: record)
         }
         // Drive the live prose-streaming preview off the turn lifecycle: a
@@ -248,7 +281,7 @@ final class AgentChatTranscriptService {
         switch record.agentKind {
         case .codex:
             return true
-        case .claude, .other:
+        case .claude, .antigravity, .other:
             return endedListability.shouldList(record, resolver: resolver, now: now())
         }
     }
@@ -406,9 +439,59 @@ final class AgentChatTranscriptService {
         if !batch.updated.isEmpty {
             emit(frame: ChatSessionEventFrame(sessionID: sessionID, event: .updated(batch.updated)))
         }
+        // Transcript-derived live state. Applied before the completed-turn
+        // check so an `idle` the tail proved cannot be overwritten by a stale
+        // `working` from earlier in the same batch.
+        registry.applyTranscriptStateUpdates(sessionID: sessionID, updates: batch.stateUpdates)
         if let completedAt = Self.completedAssistantTurnTimestamp(in: batch.appended) {
             registry.noteAssistantTurnCompleted(sessionID: sessionID, at: completedAt)
         }
+    }
+
+    /// Publishes a session's live state onto its cmux surface so the sidebar
+    /// spinner and the surface tab title reflect it.
+    ///
+    /// cmux's own agent lifecycle map is written by hooks; this adds a second
+    /// writer under its own key namespace (`agentchat.<kind>`) so the two never
+    /// clobber each other — `Workspace` already resolves a panel's effective
+    /// state by taking the most actionable entry across all keys.
+    private func mirrorStateToWorkspace(
+        _ record: AgentChatSessionRecord,
+        previous: AgentChatSessionRecord?
+    ) {
+        let key = "agentchat.\(record.agentKind.sourceName)"
+        // A session that moved surfaces must not leave a stale marker behind on
+        // the surface it left.
+        if let previousSurfaceID = previous?.surfaceID,
+           previousSurfaceID != record.surfaceID,
+           let stale = Self.workspaceAndPanel(previous) {
+            stale.workspace.clearAgentLifecycle(key: key, panelId: stale.panelId)
+        }
+        guard let target = Self.workspaceAndPanel(record) else { return }
+        switch record.state {
+        case .ended:
+            target.workspace.clearAgentLifecycle(key: key, panelId: target.panelId)
+        case .working:
+            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .running)
+        case .needsInput:
+            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .needsInput)
+        case .idle:
+            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .idle)
+        }
+    }
+
+    /// Resolves a record's `(workspace, panel)` pair, or `nil` when the session
+    /// is not bound to a live cmux surface.
+    private static func workspaceAndPanel(
+        _ record: AgentChatSessionRecord?
+    ) -> (workspace: Workspace, panelId: UUID)? {
+        guard let record,
+              let panelId = record.surfaceID.flatMap(UUID.init(uuidString:)),
+              let workspaceId = record.workspaceID.flatMap(UUID.init(uuidString:)),
+              let workspace = AppDelegate.shared?.workspaceFor(tabId: workspaceId) else {
+            return nil
+        }
+        return (workspace, panelId)
     }
 
     /// Whether a batch carries any committed agent prose, the signal that the
@@ -462,10 +545,16 @@ final class AgentChatTranscriptService {
                 Task { await tailer.stop() }
             }
         }
-        guard hasEventSubscribers() else { return }
+        // Both of these run on the Mac whether or not a phone is attached: the
+        // tailer is the local status source, and the workspace mirror is what
+        // paints the sidebar spinner and the tab-title Running/Done marker.
         if transcriptBecameAvailable, record.state != .ended {
             ensureTailer(for: record)
         }
+        if stateChanged || previous?.surfaceID != record.surfaceID {
+            mirrorStateToWorkspace(record, previous: previous)
+        }
+        guard hasEventSubscribers() else { return }
         if record.state == .ended, !endedRecordIsListable {
             emit(frame: ChatSessionEventFrame(sessionID: record.sessionID, event: .sessionRemoved(version: record.version)))
             return

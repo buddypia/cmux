@@ -1,6 +1,7 @@
 public import Foundation
 public import GhosttyKit
 public import CMUXMobileCore
+internal import CmuxTerminalCore
 
 // MARK: - Paired-iPhone (mobile) input and grid export
 
@@ -67,13 +68,13 @@ extension TerminalSurface {
         guard let surface = liveSurfaceForGhosttyAccess(reason: "mobileRenderGrid") else { return nil }
         let surfaceID = id.uuidString
         let exported = surfaceID.withCString { ptr in
-            ghostty_surface_render_grid_json_with_theme(
+            GhosttyRuntimeCInterop.renderGridJSONWithTheme(
                 surface,
-                ptr,
-                UInt(surfaceID.utf8.count),
-                stateSeq,
-                UInt(max(0, scrollbackLines)),
-                includeTheme
+                id: ptr,
+                idLen: UInt(surfaceID.utf8.count),
+                stateSeq: stateSeq,
+                scrollbackLines: UInt(max(0, scrollbackLines)),
+                includeTheme: includeTheme
             )
         }
         defer { ghostty_string_free(exported) }

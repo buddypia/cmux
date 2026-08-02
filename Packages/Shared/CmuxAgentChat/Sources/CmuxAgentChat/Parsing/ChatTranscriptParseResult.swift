@@ -25,6 +25,22 @@ public struct ChatTranscriptParseResult: Sendable, Equatable {
     /// ``messages``.
     public let artifactReferences: [ChatArtifactTranscriptReference]
 
+    /// State updates emitted by this parse call.
+    public let stateUpdates: [ChatTranscriptStateUpdate]
+
+    /// Optional title update emitted during parsing.
+    public let titleUpdate: String?
+
+    /// The session's first user prompt, when the transcript states it in a row
+    /// that produces no message of its own.
+    ///
+    /// Codex writes the prompt twice — once as an `event_msg`/`user_message`
+    /// telemetry row and once as the `response_item` the chat actually renders.
+    /// Only the second becomes a message, so the first has to reach the tailer
+    /// through this channel instead; appending it too would show every prompt
+    /// twice in the conversation.
+    public let promptTitleCandidate: String?
+
     /// Carry-over state to pass into the next parse call.
     public let state: ChatTranscriptParseState
 
@@ -34,16 +50,25 @@ public struct ChatTranscriptParseResult: Sendable, Equatable {
     ///   - messages: Messages newly produced by this call.
     ///   - updatedMessages: Completed re-emissions of earlier messages.
     ///   - artifactReferences: Raw-text and sidechain artifact occurrences.
+    ///   - stateUpdates: State updates emitted by this parse call.
+    ///   - titleUpdate: Optional title update emitted during parsing.
+    ///   - promptTitleCandidate: First user prompt stated by a message-less row.
     ///   - state: Carry-over state for the next call.
     public init(
         messages: [ChatMessage],
         updatedMessages: [ChatMessage],
         artifactReferences: [ChatArtifactTranscriptReference] = [],
+        stateUpdates: [ChatTranscriptStateUpdate] = [],
+        titleUpdate: String? = nil,
+        promptTitleCandidate: String? = nil,
         state: ChatTranscriptParseState
     ) {
         self.messages = messages
         self.updatedMessages = updatedMessages
         self.artifactReferences = artifactReferences
+        self.stateUpdates = stateUpdates
+        self.titleUpdate = titleUpdate
+        self.promptTitleCandidate = promptTitleCandidate
         self.state = state
     }
 }

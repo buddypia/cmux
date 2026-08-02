@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import CmuxAgentChat
 
 @MainActor
 final class AgentSessionPanel: Panel {
@@ -10,7 +11,10 @@ final class AgentSessionPanel: Panel {
     let rendererKind: AgentSessionRendererKind
     let initialProviderID: AgentSessionProviderID
     private(set) var workingDirectory: String?
-    let rendererSession = AgentSessionWebRendererSession()
+
+    let scene: AgentStudioScene
+    let workspaceManager: AgentStudioWorkspaceManager
+    let ptyBinding: PTYBinding
 
     private(set) var currentProviderID: AgentSessionProviderID
     private(set) var displayTitle: String
@@ -35,11 +39,21 @@ final class AgentSessionPanel: Panel {
         self.currentProviderID = initialProviderID
         self.workingDirectory = workingDirectory
         self.displayTitle = Self.title(provider: initialProviderID, rendererKind: rendererKind)
-        self.rendererSession.onHasActiveProviderChanged = { [weak self] hasActiveProvider in
-            self?.setHasActiveProvider(hasActiveProvider)
-        }
-        self.rendererSession.onProviderIDChanged = { [weak self] providerID in
-            self?.setCurrentProviderID(providerID)
+
+        let scene = AgentStudioScene(size: CGSize(width: 800, height: 600))
+        let manager = AgentStudioWorkspaceManager()
+        let binding = PTYBinding()
+
+        self.scene = scene
+        self.workspaceManager = manager
+        self.ptyBinding = binding
+
+        manager.loadWorkspaces()
+        if let active = manager.activeWorkspace {
+            binding.attach(to: scene, workspace: active)
+            for agent in active.agents {
+                scene.addAgent(id: agent.id, characterId: agent.characterId, seatIndex: agent.seatIndex)
+            }
         }
     }
 
@@ -51,17 +65,11 @@ final class AgentSessionPanel: Panel {
         return String(format: format, provider.displayName, rendererKind.displayName)
     }
 
-    func focus() {
-        rendererSession.focus()
-    }
+    func focus() {}
 
-    func unfocus() {
-        rendererSession.unfocus()
-    }
+    func unfocus() {}
 
-    func close() {
-        rendererSession.close()
-    }
+    func close() {}
 
     func updateWorkspaceId(_ newWorkspaceId: UUID) {
         workspaceId = newWorkspaceId

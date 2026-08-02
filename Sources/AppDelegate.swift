@@ -2062,6 +2062,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ensureMobileWorkspaceListObserver(for: tabManager)
         MobileTerminalRenderObserver.shared.start()
         agentChatTranscriptService.start()
+        AntigravitySurfaceStatusObserver.shared.start()
         installMobileHostSettingsObserver()
         scheduleGhosttyCrashBreadcrumbIfNeeded(notificationStore: notificationStore)
         startPaneMemoryGuardrailIfNeeded()
@@ -4730,6 +4731,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // Remove the bootstrap workspace from the new window once the moved workspace arrives.
         if let bootstrapWorkspaceId,
            bootstrapWorkspaceId != workspaceId,
+           let bootstrapWorkspace = destinationManager.tabs.first(where: { $0.id == bootstrapWorkspaceId }),
+           destinationManager.tabs.count > 1 {
+            destinationManager.closeWorkspace(bootstrapWorkspace, recordHistory: false)
+        }
+        return windowId
+    }
+
+    @discardableResult
+    func moveWorkspaceGroupToWindow(groupId: UUID, windowId: UUID, atIndex: Int? = nil, focus: Bool = true) -> Bool {
+        guard let sourceManager = tabManagerFor(groupId: groupId),
+              let destinationManager = tabManagerFor(windowId: windowId) else {
+            return false
+        }
+
+        if sourceManager === destinationManager {
+            if focus, let group = sourceManager.workspaceGroups.first(where: { $0.id == groupId }),
+               let anchorWorkspace = sourceManager.tabs.first(where: { $0.id == group.anchorWorkspaceId }) {
+                destinationManager.selectWorkspace(anchorWorkspace)
+                _ = focusMainWindow(windowId: windowId)
+                TerminalController.shared.setActiveTabManager(destinationManager)
+            }
+            return true
+        }
+
+        guard let detached = sourceManager.detachWorkspaceGroup(groupId: groupId) else { return false }
+        destinationManager.attachWorkspaceGroup(group: detached.group, workspaces: detached.workspaces, at: atIndex, select: focus)
+
+        if focus {
+            _ = focusMainWindow(windowId: windowId)
+            TerminalController.shared.setActiveTabManager(destinationManager)
+        }
+        return true
+    }
+
+    @discardableResult
+    func moveWorkspaceGroupToNewWindow(groupId: UUID, focus: Bool = true) -> UUID? {
+        let windowId = createMainWindow()
+        guard let destinationManager = tabManagerFor(windowId: windowId) else { return nil }
+        let bootstrapWorkspaceId = destinationManager.tabs.first?.id
+
+        guard moveWorkspaceGroupToWindow(groupId: groupId, windowId: windowId, focus: focus) else {
+            _ = closeMainWindow(windowId: windowId, recordHistory: false)
+            return nil
+        }
+
+        if let bootstrapWorkspaceId,
            let bootstrapWorkspace = destinationManager.tabs.first(where: { $0.id == bootstrapWorkspaceId }),
            destinationManager.tabs.count > 1 {
             destinationManager.closeWorkspace(bootstrapWorkspace, recordHistory: false)

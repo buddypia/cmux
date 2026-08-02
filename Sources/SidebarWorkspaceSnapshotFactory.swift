@@ -74,6 +74,15 @@ struct SidebarWorkspaceSnapshotFactory {
             )
         }
         let checklistProgress = workspace.checklistProgressSummary
+        // One walk of the surfaces feeds both the badge strip and the output
+        // preview: resolving them separately would repeat the per-surface
+        // status resolution on every sidebar refresh. `hidesAllDetails` is the
+        // user's "title only" mode, so it suppresses both.
+        let agentSurfaceStatuses = settings.hidesAllDetails
+            ? []
+            : workspace.agentSurfaceStatuses(orderedPanelIds: orderedPanelIds)
+        let agentStatusGroups = AgentStatusBadgeSummary.cliGroups(from: agentSurfaceStatuses)
+        let latestAgentOutput = AgentStatusBadgeSummary.latestOutput(from: agentSurfaceStatuses)
 
         return SidebarWorkspaceSnapshotBuilder.Snapshot(
             presentationKey: presentationKey,
@@ -101,6 +110,8 @@ struct SidebarWorkspaceSnapshotFactory {
                 showsAgentActivity: showsAgentActivity,
                 statesByPanelId: workspace.agentLifecycleStatesByPanelId
             ),
+            agentStatusGroups: agentStatusGroups,
+            latestAgentOutput: latestAgentOutput,
             compactGitBranchSummaryText: compactGitBranchSummaryText,
             compactDirectoryCandidates: compactDirectoryCandidates,
             compactBranchDirectoryCandidates: compactBranchDirectoryCandidates,

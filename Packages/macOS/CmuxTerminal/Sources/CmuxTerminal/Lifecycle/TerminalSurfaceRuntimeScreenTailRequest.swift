@@ -1,5 +1,6 @@
 internal import Foundation
 internal import GhosttyKit
+internal import CmuxTerminalCore
 
 /// A bounded native screen-tail read serialized with native surface teardown.
 ///
@@ -14,11 +15,11 @@ struct TerminalSurfaceRuntimeScreenTailRequest: @unchecked Sendable {
 
     func read() -> String? {
         var text = ghostty_text_s()
-        guard ghostty_surface_read_screen_tail_vt(
+        guard GhosttyRuntimeCInterop.readScreenTailVT(
             surface,
-            UInt(maxRows),
-            UInt(maxBytes),
-            &text
+            maxRows: UInt(maxRows),
+            maxBytes: UInt(maxBytes),
+            text: &text
         ) else {
             return nil
         }

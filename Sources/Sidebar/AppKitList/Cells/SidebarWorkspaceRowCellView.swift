@@ -33,6 +33,7 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
     private let closeButton = SidebarHeaderGlyphButton()
     // Detail slots
     private let descriptionView = SidebarRowTextView(lines: 12)
+    private var agentStatusPills: [SidebarRowAgentStatusPill] = []
     private let subtitleView = SidebarRowTextView(lines: 2)
     private let remoteTargetView = SidebarRowTextView(lines: 1)
     private let remoteStatusView = SidebarRowTextView(lines: 1)
@@ -380,12 +381,22 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
             }
         }
 
+        configureAgentStatusPills(model: model, palette: palette)
+
         let conversationSubtitle: String? = {
             guard !settings.hidesAllDetails, settings.iMessageModeEnabled else { return nil }
             let trimmed = snapshot.latestConversationMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
             return (trimmed?.isEmpty == false) ? trimmed : nil
         }()
-        let effectiveSubtitle = model.latestNotificationText ?? conversationSubtitle
+        // The agent's own last output is the answer to "what happened on this
+        // workspace while I was away", so it stands in whenever there is no
+        // notification and no iMessage-mode preview to show instead.
+        let agentOutputSubtitle: String? = {
+            guard !settings.hidesAllDetails else { return nil }
+            let trimmed = snapshot.latestAgentOutput?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed?.isEmpty == false) ? trimmed : nil
+        }()
+        let effectiveSubtitle = model.latestNotificationText ?? conversationSubtitle ?? agentOutputSubtitle
         let subtitleLineLimit = model.latestNotificationText == nil ? 2 : settings.notificationMessageLineLimit
         subtitleView.isHidden = effectiveSubtitle == nil
         if let effectiveSubtitle {
@@ -449,6 +460,34 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
             localized: "accessibility.workspacePosition",
             defaultValue: "\(snapshot.title), workspace \(model.index + 1) of \(model.accessibilityWorkspaceCount)"
         ))
+    }
+
+    /// Builds the `Claude ⚡2 ✅1  Codex 💤3` strip — one pill per CLI. Pooled
+    /// like every other repeated row slot so a workspace flipping between one
+    /// and three CLIs reuses views instead of rebuilding the subtree.
+    private func configureAgentStatusPills(
+        model: SidebarWorkspaceRowModel,
+        palette: SidebarRowPalette
+    ) {
+        let groups = model.snapshot.agentStatusGroups
+        Self.pool(&agentStatusPills, count: groups.count, parent: self) { SidebarRowAgentStatusPill() }
+        guard !groups.isEmpty else { return }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: model.scaled(9), weight: .semibold)
+        let fill = model.isActive
+            ? palette.selectedForeground(0.16)
+            : NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        for (index, group) in groups.enumerated() {
+            agentStatusPills[index].configure(
+                group: group,
+                font: font,
+                textColor: palette.secondary(0.92),
+                fillColor: fill,
+                toolTip: SidebarAgentStatusBadgeText.tooltip(for: group)
+            )
+        }
+        agentStatusPills[0].setAccessibilityLabel(
+            SidebarAgentStatusBadgeText.accessibilityLabel(for: groups)
+        )
     }
 
     private func configureStatusSlot(
@@ -705,19 +744,60 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
             }
         }
         let ports = settings.visibleAuxiliaryDetails.showsPorts ? snapshot.listeningPorts : []
-        Self.pool(&portButtons, count: ports.count, parent: self) { SidebarRowLinkButton() }
-        for (index, port) in ports.enumerated() {
+        // Cap the individually clickable chips so a workspace running many
+        // terminals collapses to "3000 3001 3002 +5" instead of wrapping the
+        // row across several lines of ports.
+        let portDisplay = SidebarDetailAggregation.portDisplay(ports: ports)
+        let chipCount = portDisplay.visible.count + (portDisplay.hasOverflow ? 1 : 0)
+        let portFont = NSFont.monospacedSystemFont(ofSize: model.scaled(10), weight: .regular)
+        Self.pool(&portButtons, count: chipCount, parent: self) { SidebarRowLinkButton() }
+        for (index, port) in portDisplay.visible.enumerated() {
             portButtons[index].configure(
                 title: SidebarPortDisplayText.label(for: port),
-                font: .monospacedSystemFont(ofSize: model.scaled(10), weight: .regular),
+                font: portFont,
                 color: palette.secondary(0.75),
                 underlined: true,
-                toolTip: String(localized: "sidebar.port.openTooltip", defaultValue: "Open localhost port")
+                toolTip: SidebarPortDisplayText.openTooltip(for: port)
             ) { [weak self] in
                 self?.actions?.commands.updateSelection()
                 self?.actions?.onOpenPort(port)
             }
         }
+        if portDisplay.hasOverflow {
+            let hidden = portDisplay.overflow
+            portButtons[portDisplay.visible.count].configure(
+                title: SidebarDetailAggregation.portOverflowLabel(count: hidden.count),
+                font: portFont,
+                color: palette.secondary(0.6),
+                underlined: false,
+                toolTip: SidebarDetailAggregation.portOverflowTooltip(ports: hidden)
+            ) { [weak self] in
+                self?.actions?.commands.updateSelection()
+                self?.presentPortOverflowMenu(ports: hidden)
+            }
+        }
+    }
+
+    /// Menu listing the ports the `+N` chip collapsed, so every port stays
+    /// reachable with one extra click instead of disappearing behind the cap.
+    private func presentPortOverflowMenu(ports: [Int]) {
+        guard let button = portButtons.last(where: { !$0.isHidden }) else { return }
+        let menu = NSMenu()
+        for port in ports {
+            let item = NSMenuItem(
+                title: SidebarPortDisplayText.openTooltip(for: port),
+                action: #selector(didSelectOverflowPort(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = port
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY), in: button)
+    }
+
+    @objc private func didSelectOverflowPort(_ sender: NSMenuItem) {
+        actions?.onOpenPort(sender.tag)
     }
 
     private static func pool<View: NSView>(
@@ -901,6 +981,34 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
         }
 
         placeBlock(descriptionView)
+
+        // Agent status strip: one pill per CLI, wrapping the same way the port
+        // chips do so a workspace running several CLIs cannot run its badges
+        // past the row's trailing edge. Each pill is also clamped to the
+        // content width — wrapping alone cannot save the first pill on a line,
+        // and a pill clips its own text but the row does not clip the pill.
+        let visibleAgentPills = agentStatusPills.filter { !$0.isHidden }
+        if !visibleAgentPills.isEmpty {
+            y += spacing
+            let maxPillWidth = max(trailing - leading, 0)
+            var pillX = leading
+            var pillLineHeight: CGFloat = 0
+            for pill in visibleAgentPills {
+                let size = pill.fittingPillSize(maxWidth: maxPillWidth)
+                if pillX > leading, pillX + size.width > trailing {
+                    y += pillLineHeight + 3
+                    pillX = leading
+                    pillLineHeight = 0
+                }
+                if apply {
+                    pill.frame = NSRect(x: pillX, y: y, width: size.width, height: size.height)
+                }
+                pillX += size.width + 4
+                pillLineHeight = max(pillLineHeight, size.height)
+            }
+            y += pillLineHeight
+        }
+
         placeBlock(subtitleView)
 
         if !remoteTargetView.isHidden {

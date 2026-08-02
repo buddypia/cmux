@@ -18,4 +18,6 @@ exec xcodebuild \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -destination "$DESTINATION" \
+  ENABLE_APP_INTENTS_METADATA_EXTRACTION=NO \
+  SWIFT_EMIT_APP_INTENTS_METADATA=NO \
   "$@"

@@ -18,6 +18,19 @@ elif [[ -n "${CMUX_RELOAD_BASE_APP_NAME:-}" ]]; then
   BASE_APP_NAME="$CMUX_RELOAD_BASE_APP_NAME"
   APP_NAME="$BASE_APP_NAME"
 fi
+
+# The installed Release app this checkout builds, used as the dev shim's
+# fallback so a shell that runs `cmux` outside a reload-selected build lands on
+# *this* fork's app rather than an unrelated upstream install that happens to
+# share the `cmux` name. Derived from the Debug product name (drop the " DEV"
+# suffix) so a rename only has to happen in the project file. Falls back to
+# `/Applications/cmux.app` when the fork's Release app is not installed, which
+# keeps a plain upstream checkout working exactly as before.
+RELEASE_APP_NAME="${BASE_APP_NAME% DEV}"
+FALLBACK_APP_CLI_DIR="/Applications/${RELEASE_APP_NAME}.app/Contents/Resources/bin"
+if [[ ! -x "$FALLBACK_APP_CLI_DIR/cmux" ]]; then
+  FALLBACK_APP_CLI_DIR="/Applications/cmux.app/Contents/Resources/bin"
+fi
 DERIVED_DATA=""
 NAME_SET=0
 BUNDLE_SET=0
@@ -122,7 +135,7 @@ EOF
 }
 
 select_cmux_shim_target() {
-  local app_cli_dir="/Applications/cmux.app/Contents/Resources/bin"
+  local app_cli_dir="$FALLBACK_APP_CLI_DIR"
   local marker="cmux dev shim (managed by scripts/reload.sh)"
   local target=""
   local path_entry=""
@@ -185,11 +198,11 @@ publish_reload_cli_path() {
 
   # Stable shim that always follows the last reload-selected dev CLI.
   DEV_CLI_SHIM="$HOME/.local/bin/cmux-dev"
-  write_dev_cli_shim "$DEV_CLI_SHIM" "/Applications/cmux.app/Contents/Resources/bin/cmux"
+  write_dev_cli_shim "$DEV_CLI_SHIM" "$FALLBACK_APP_CLI_DIR/cmux"
 
   CMUX_SHIM_TARGET="$(select_cmux_shim_target || true)"
   if [[ -n "${CMUX_SHIM_TARGET:-}" ]]; then
-    write_dev_cli_shim "$CMUX_SHIM_TARGET" "/Applications/cmux.app/Contents/Resources/bin/cmux"
+    write_dev_cli_shim "$CMUX_SHIM_TARGET" "$FALLBACK_APP_CLI_DIR/cmux"
   fi
 }
 
@@ -677,6 +690,8 @@ XCODEBUILD_ARGS=(
   -scheme cmux
   -configuration Debug
   -destination 'platform=macOS'
+  ENABLE_APP_INTENTS_METADATA_EXTRACTION=NO
+  SWIFT_EMIT_APP_INTENTS_METADATA=NO
 )
 if [[ -n "$DERIVED_DATA" ]]; then
   XCODEBUILD_ARGS+=(-derivedDataPath "$DERIVED_DATA")

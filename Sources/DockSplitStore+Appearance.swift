@@ -45,7 +45,6 @@ extension DockSplitStore {
             // orientations while still keeping a usable floor.
             minimumPaneWidth: Self.minimumDockPaneSize,
             minimumPaneHeight: Self.minimumDockPaneSize,
-            dividerHitExpansion: PortalSplitDividerRegion.dividerHitExpansion,
             splitButtonBackdropEffect: Workspace.bonsplitSplitButtonBackdropEffect(),
             splitButtonTooltips: Workspace.currentSplitButtonTooltips(),
             enableAnimations: false,

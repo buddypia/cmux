@@ -35,6 +35,96 @@ extension Workspace {
         set { sidebarAgentRuntimeObservation.setAgentLifecycleStatesByPanelId(newValue) }
     }
 
+    var agentLastMessagesByPanelId: [UUID: String] {
+        get { sidebarAgentRuntimeObservation.agentLastMessagesByPanelId }
+        set { sidebarAgentRuntimeObservation.setAgentLastMessagesByPanelId(newValue) }
+    }
+
+    var restoredAgentStatusesByPanelId: [UUID: RestoredAgentSurfaceStatus] {
+        get { sidebarAgentRuntimeObservation.restoredAgentStatusesByPanelId }
+        set { sidebarAgentRuntimeObservation.setRestoredAgentStatusesByPanelId(newValue) }
+    }
+
+    /// Records the agent's last conversation output on `panelId`.
+    ///
+    /// A live report also retires that surface's restored status: once the
+    /// resumed agent speaks, the pre-restart reading is history.
+    func recordAgentLastMessage(_ message: String?, panelId: UUID) {
+        let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return }
+        let preview = Self.conversationMessagePreview(from: trimmed) ?? trimmed
+        var messages = agentLastMessagesByPanelId
+        messages[panelId] = preview
+        agentLastMessagesByPanelId = messages
+    }
+
+    /// The resolved agent status for one surface: the live lifecycle reading
+    /// when an agent is bound, otherwise the status restored from the last
+    /// session snapshot.
+    func agentSurfaceStatus(forPanelId panelId: UUID) -> AgentSurfaceStatusSummary? {
+        if let live = AgentSurfaceStatusSummary.resolve(
+            lifecycleStates: agentLifecycleStatesByPanelId[panelId] ?? [:],
+            hasBeenActive: sidebarAgentRuntimeObservation.agentEverActivePanelIds.contains(panelId),
+            lastMessage: agentLastMessagesByPanelId[panelId]
+        ) {
+            return live
+        }
+        guard let restored = restoredAgentStatusesByPanelId[panelId] else { return nil }
+        // A resumed agent can speak (Stop hook) before it reports a lifecycle
+        // state, so a live message outranks the one frozen into the snapshot.
+        guard let liveMessage = agentLastMessagesByPanelId[panelId] else { return restored.summary }
+        var summary = restored.summary
+        summary.lastMessage = liveMessage
+        return summary
+    }
+
+    /// Every surface's resolved agent status.
+    ///
+    /// - Parameter orderedPanelIds: The sidebar's surface order when the caller
+    ///   already computed it, so the "latest output" pick matches the tab bar.
+    ///   Omit it to fall back to a stable id sort: `sidebarOrderedPanelIds()`
+    ///   builds a layout-tree snapshot, and paying for one on every sidebar
+    ///   refresh just to order a badge count would not be worth it.
+    func agentSurfaceStatuses(orderedPanelIds: [UUID]? = nil) -> [AgentSurfaceStatusSummary] {
+        let panelIds = orderedPanelIds ?? panels.keys.sorted { $0.uuidString < $1.uuidString }
+        return panelIds.compactMap { agentSurfaceStatus(forPanelId: $0) }
+    }
+
+    /// The `⚡ / ✅ / 💤` marker for `panelId`, or `nil` when no coding agent is
+    /// bound to that surface.
+    func agentTabTitleStatus(forPanelId panelId: UUID) -> AgentTabTitleStatus? {
+        agentSurfaceStatus(forPanelId: panelId)?.status
+    }
+
+    /// Rebuilds the restored-status and last-message maps from a session
+    /// snapshot, remapping the persisted panel ids onto the surfaces that were
+    /// just recreated. Both maps are replaced, never merged, so a surface the
+    /// snapshot dropped cannot keep advertising a status from two runs ago.
+    func restoreAgentSurfaceStatuses(
+        from snapshot: SessionWorkspaceSnapshot,
+        oldToNewPanelIds: [UUID: UUID]
+    ) {
+        var restoredStatuses: [UUID: RestoredAgentSurfaceStatus] = [:]
+        var lastMessages: [UUID: String] = [:]
+        for panelSnapshot in snapshot.panels {
+            guard let agentStatus = panelSnapshot.agentStatus,
+                  let panelId = oldToNewPanelIds[panelSnapshot.id] ?? (panels[panelSnapshot.id] != nil ? panelSnapshot.id : nil),
+                  let status = AgentTabTitleStatus(rawValue: agentStatus.status) else {
+                continue
+            }
+            restoredStatuses[panelId] = RestoredAgentSurfaceStatus(
+                status: status,
+                agentKey: agentStatus.agentKey,
+                lastMessage: agentStatus.lastMessage
+            )
+            if let message = agentStatus.lastMessage, !message.isEmpty {
+                lastMessages[panelId] = message
+            }
+        }
+        restoredAgentStatusesByPanelId = restoredStatuses
+        agentLastMessagesByPanelId = lastMessages
+    }
+
     func agentRuntimeState(forPanelId panelId: UUID) -> DetachedAgentRuntimeState? {
         let pidKeys = agentPIDKeysByPanelId[panelId] ?? []
 
@@ -428,6 +518,8 @@ extension Workspace {
         manualUnreadMarkedAt.removeValue(forKey: panelId)
         panelShellActivityStates.removeValue(forKey: panelId)
         clearAgentLifecycleStates(panelId: panelId)
+        agentLastMessagesByPanelId.removeValue(forKey: panelId)
+        restoredAgentStatusesByPanelId.removeValue(forKey: panelId)
         surfaceTTYNames.removeValue(forKey: panelId)
         discardRemotePTYSessionID(panelId: panelId)
         surfaceResumeBindingsByPanelId.removeValue(forKey: panelId)

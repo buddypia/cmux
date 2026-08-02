@@ -242,6 +242,11 @@ extension Workspace {
         clearAllAgentPIDs(refreshPorts: false)
         clearAllAgentLifecycleStates()
         agentListeningPorts.removeAll()
+        // The *display* status is a different thing from the runtime state
+        // above: "Claude Code finished, and this is what it said" is exactly
+        // what the user reopened the app to see. It restores as read-only
+        // history and retires the moment a live agent reports on the surface.
+        restoreAgentSurfaceStatuses(from: snapshot, oldToNewPanelIds: oldToNewPanelIds)
         logEntries = snapshot.logEntries.map { entry in
             SidebarLogEntry(
                 message: entry.message,
@@ -303,9 +308,7 @@ extension Workspace {
                 SessionPaneLayoutSnapshot(
                     panelIds: panelIds,
                     selectedPanelId: selectedPanelId,
-                    isFullWidthTabMode: UUID(uuidString: pane.id).map { paneId in
-                        bonsplitController.isFullWidthTabMode(inPane: PaneID(id: paneId))
-                    }
+                    isFullWidthTabMode: nil
                 )
             )
         case .split(let split):
@@ -704,7 +707,14 @@ extension Workspace {
             rightSidebarTool: rightSidebarToolSnapshot,
             customSidebar: customSidebarSnapshot,
             agentSession: agentSessionSnapshot,
-            project: projectSnapshot, workspaceTodo: workspaceTodoSnapshot
+            project: projectSnapshot, workspaceTodo: workspaceTodoSnapshot,
+            agentStatus: agentSurfaceStatus(forPanelId: panelId).map {
+                SessionAgentSurfaceStatusSnapshot(
+                    status: $0.status.rawValue,
+                    agentKey: $0.agentKey,
+                    lastMessage: $0.lastMessage
+                )
+            }
         )
     }
     private func closedPanelHistoryEntry(panelId: UUID, tabId: TabID, pane: PaneID) -> ClosedPanelHistoryEntry? {
@@ -1161,7 +1171,6 @@ extension Workspace {
             .tabs(inPane: paneId)
             .compactMap { panelIdFromSurfaceId($0.id) }
         let desiredOldPanelIds = snapshot.panelIds.filter { panelSnapshotsById[$0] != nil }
-        _ = bonsplitController.setFullWidthTabMode(false, inPane: paneId)
 
         var createdPanelIds: [UUID] = []
         for oldPanelId in desiredOldPanelIds {
@@ -1197,10 +1206,6 @@ extension Workspace {
            let selectedTabId = surfaceIdFromPanelId(selectedPanelId) {
             bonsplitController.focusPane(paneId)
             bonsplitController.selectTab(selectedTabId)
-        }
-
-        if snapshot.isFullWidthTabMode == true {
-            _ = bonsplitController.setFullWidthTabMode(true, inPane: paneId)
         }
     }
 
@@ -2776,7 +2781,6 @@ final class Workspace: Identifiable, ObservableObject {
         return BonsplitConfiguration.Appearance(
             tabBarHeight: WindowChromeMetrics.bonsplitTabBarHeight,
             tabTitleFontSize: tabTitleFontSize,
-            dividerHitExpansion: PortalSplitDividerRegion.dividerHitExpansion,
             splitButtonBackdropEffect: Self.bonsplitSplitButtonBackdropEffect(),
             splitButtonTooltips: Self.currentSplitButtonTooltips(),
             enableAnimations: false,
@@ -3089,6 +3093,10 @@ final class Workspace: Identifiable, ObservableObject {
             case .available:
                 return .available
             case .agentIndexRefreshing:
+                // The live-agent index is mid-refresh, so "no snapshot yet" is
+                // not the same answer as "this tab can't fork". Reporting it
+                // keeps the menu item present-but-pending instead of hiding it
+                // on the first open and appearing on the second.
                 return .refreshing
             case .notTerminalPanel,
                  .noAgentSnapshot,
@@ -3112,11 +3120,6 @@ final class Workspace: Identifiable, ObservableObject {
             guard let self,
                   let panelId = self.panelIdFromSurfaceId(tabId) else { return false }
             return self.toggleSplitZoom(panelId: panelId)
-        }
-        bonsplitController.onTabFullWidthToggleRequest = { [weak self] tabId, _ in
-            guard let self,
-                  let panelId = self.panelIdFromSurfaceId(tabId) else { return false }
-            return self.toggleFullWidthTabMode(panelId: panelId)
         }
 
         // Set ourselves as delegate
@@ -3917,14 +3920,29 @@ final class Workspace: Identifiable, ObservableObject {
         return nil
     }
 
+    /// The title every surface-tab consumer renders: custom name when the user
+    /// set one, else the live process title, always stamped with the agent
+    /// status marker so the tab bar shows Running/Done without a second lane.
+    ///
+    /// The marker is applied here — the single choke point all title paths
+    /// already funnel through — so the tab bar, the socket, and the command
+    /// palette can never disagree about a surface's status.
     func resolvedPanelTitle(panelId: UUID, fallback: String) -> String {
         let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackTitle = trimmedFallback.isEmpty ? "Tab" : trimmedFallback
+        let baseTitle: String
         if let custom = panelCustomTitles[panelId]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !custom.isEmpty {
-            return custom
+            baseTitle = custom
+        } else {
+            baseTitle = fallbackTitle
         }
-        return fallbackTitle
+        let agentStatus = agentSurfaceStatus(forPanelId: panelId)
+        return AgentTabTitleStatus.decorate(
+            title: baseTitle,
+            status: agentStatus?.status,
+            agentName: agentStatus?.agentShortDisplayName
+        )
     }
 
     private func syncPinnedStateForTab(_ tabId: TabID, panelId: UUID) {
@@ -4067,7 +4085,13 @@ final class Workspace: Identifiable, ObservableObject {
     @discardableResult
     func setPanelCustomTitle(panelId: UUID, title: String?, source: CustomTitleSource = .user) -> Bool {
         guard panels[panelId] != nil else { return false }
-        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Rename fields (and socket clients) hand back whatever the tab was
+        // displaying, marker included. Store the bare name so the marker stays
+        // derived state and a rename can never freeze a stale `✅` into the
+        // persisted title.
+        let trimmed = title
+            .map { AgentTabTitleStatus.undecorated($0) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let previous = panelCustomTitles[panelId]
         if source == .auto {
             guard !trimmed.isEmpty else { return false }
@@ -4833,6 +4857,8 @@ final class Workspace: Identifiable, ObservableObject {
         clearAllAgentPIDs(refreshPorts: false)
         clearAllAgentLifecycleStates()
         agentListeningPorts.removeAll()
+        agentLastMessagesByPanelId = [:]
+        restoredAgentStatusesByPanelId = [:]
         latestConversationMessage = nil
         latestSubmittedMessage = nil
         latestSubmittedAt = nil
@@ -7567,7 +7593,6 @@ final class Workspace: Identifiable, ObservableObject {
             title: replacementPanel.displayTitle,
             icon: .some(replacementPanel.displayIcon),
             iconImageData: .some(nil),
-            iconAsset: .some(nil),
             kind: .some(SurfaceKind.terminal.rawValue),
             hasCustomTitle: false,
             isDirty: replacementPanel.isDirty,
@@ -7711,7 +7736,6 @@ final class Workspace: Identifiable, ObservableObject {
             title: resolvedTitle,
             icon: .some(replacementPanel.displayIcon),
             iconImageData: .some(nil),
-            iconAsset: .some(nil),
             kind: .some(SurfaceKind.terminal.rawValue),
             hasCustomTitle: customTitle != nil,
             isDirty: replacementPanel.isDirty,
@@ -12646,9 +12670,6 @@ extension Workspace: BonsplitDelegate {
         case .toggleZoom:
             guard let panelId = panelIdFromSurfaceId(tab.id) else { return }
             toggleSplitZoom(panelId: panelId)
-        case .toggleFullWidthTab:
-            guard let panelId = panelIdFromSurfaceId(tab.id) else { return }
-            toggleFullWidthTabMode(panelId: panelId)
         case .forkConversation,
              .forkConversationRight,
              .forkConversationLeft,

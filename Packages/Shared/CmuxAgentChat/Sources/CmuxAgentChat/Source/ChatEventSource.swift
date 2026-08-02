@@ -63,6 +63,20 @@ public protocol ChatEventSource: Sendable {
     ///   - sessionID: The session being answered.
     func answer(optionIndex: Int, sessionID: String) async throws
 
+    /// Answers a pending in-terminal choice (question option or permission
+    /// button) by its display index.
+    ///
+    /// Implementations translate the index into whatever the agent's
+    /// terminal UI expects (number key, arrow + return).
+    ///
+    /// - Parameters:
+    ///   - optionIndex: Display index.
+    ///   - sessionID: The destination session.
+    func selectOption(index optionIndex: Int, sessionID: String) async throws
+
+    /// Submits the current pending form input to the agent.
+    func submit(sessionID: String) async throws
+
     /// Fetches metadata for a referenced artifact path.
     ///
     /// - Parameters:
@@ -169,6 +183,12 @@ public extension ChatEventSource {
     ) async throws -> ChatArtifactThumbnail {
         throw ChatArtifactError.unsupported
     }
+
+    /// Default submit implementation.
+    func submit(sessionID: String) async throws {}
+
+    /// Default selectOption implementation.
+    func selectOption(index optionIndex: Int, sessionID: String) async throws {}
 
     /// Unsupported-by-default artifact directory-list implementation.
     func artifactList(sessionID: String, path: String) async throws -> ChatArtifactDirectoryListing {

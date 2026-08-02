@@ -55,4 +55,6 @@ struct SidebarGroupHeaderRowActions {
     let onDelete: () -> Void
     let onEditConfig: () -> Void
     let onOpenDocs: () -> Void
+    let onMoveGroupToWindow: (UUID) -> Void
+    let onMoveGroupToNewWindow: () -> Void
 }

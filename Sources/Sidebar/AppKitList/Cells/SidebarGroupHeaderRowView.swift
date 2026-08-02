@@ -499,6 +499,32 @@ final class SidebarGroupHeaderTableCellView: NSTableCellView {
         menu.addItem(.separator())
         appendConfigAndDocsItems(to: menu)
         menu.addItem(.separator())
+
+        let sourceTabManager = AppDelegate.shared?.tabManagerFor(groupId: model.groupId)
+        let referenceWindowId = sourceTabManager.flatMap { AppDelegate.shared?.windowId(for: $0) }
+        let windowMoveTargets = AppDelegate.shared?.windowMoveTargets(referenceWindowId: referenceWindowId) ?? []
+        let moveMenuTitle = String(localized: "workspaceGroup.contextMenu.moveGroupToWindow", defaultValue: "Move Group to Window")
+        let moveSubmenu = trackedMenu()
+        moveSubmenu.addItem(menuItem(
+            String(localized: "contextMenu.newWindow", defaultValue: "New Window"),
+            action: actions.onMoveGroupToNewWindow
+        ))
+        if !windowMoveTargets.isEmpty {
+            moveSubmenu.addItem(.separator())
+        }
+        for target in windowMoveTargets {
+            let targetWindowId = target.windowId
+            moveSubmenu.addItem(menuItem(
+                target.label,
+                enabled: !target.isCurrentWindow,
+                action: { actions.onMoveGroupToWindow(targetWindowId) }
+            ))
+        }
+        let parentMoveItem = menuItem(moveMenuTitle, action: {})
+        parentMoveItem.submenu = moveSubmenu
+        menu.addItem(parentMoveItem)
+
+        menu.addItem(.separator())
         menu.addItem(menuItem(
             String(localized: "workspaceGroup.contextMenu.ungroup", defaultValue: "Ungroup Workspaces"),
             action: actions.onUngroup

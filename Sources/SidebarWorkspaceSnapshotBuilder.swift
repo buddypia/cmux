@@ -48,6 +48,13 @@ struct SidebarWorkspaceSnapshotBuilder {
         let latestLog: SidebarLogEntry?
         let progress: SidebarProgressState?
         let activeCodingAgentCount: Int
+        /// Per-CLI surface counts (`Claude ⚡2 ✅1`, `Codex 💤3`), ordered most
+        /// actionable CLI first. Empty when no surface in the workspace has an
+        /// agent — live or restored.
+        let agentStatusGroups: [AgentStatusBadgeGroup]
+        /// The agent's last conversation output for the workspace, preferring a
+        /// working surface over a finished one.
+        let latestAgentOutput: String?
         let compactGitBranchSummaryText: String?
         let compactDirectoryCandidates: [String]
         let compactBranchDirectoryCandidates: [String]

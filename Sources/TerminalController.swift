@@ -5666,10 +5666,19 @@ class TerminalController {
             }
         case .stop:
             let assistantFinalMessage = event.assistantFinalMessage
-            Task { @MainActor [weak self, rawWorkspaceId, assistantFinalMessage, iMessageModeEnabled] in
+            let rawSurfaceId = event.surfaceId
+            Task { @MainActor [weak self, rawWorkspaceId, rawSurfaceId, assistantFinalMessage, iMessageModeEnabled] in
                 guard let self,
                       let workspaceId = self.v2UUIDAny(rawWorkspaceId) else { return }
                 guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: workspaceId) else { return }
+                // Per-surface first and unconditionally: the sidebar status
+                // strip and the session snapshot need this text whether or not
+                // the workspace-level iMessage preview is switched on.
+                tabManager.recordAgentSurfaceMessage(
+                    workspaceId: workspaceId,
+                    surfaceId: self.v2UUIDAny(rawSurfaceId),
+                    message: assistantFinalMessage
+                )
                 _ = tabManager.handleAssistantFinalMessage(
                     workspaceId: workspaceId,
                     message: assistantFinalMessage,
@@ -6652,45 +6661,7 @@ class TerminalController {
         return v2BrowserOpenSplit(params: adjustedParams)
     }
 
-    private func v2IsDiffViewerURL(_ url: URL?) -> Bool {
-        guard let url else { return false }
-        if url.scheme?.lowercased() == CmuxDiffViewerURLSchemeHandler.scheme {
-            return true
-        }
-        return url.scheme?.lowercased() == "http" &&
-            url.host == "127.0.0.1" &&
-            url.fragment == "cmux-diff-viewer"
-    }
 
-    private func v2RegisterDiffViewerURLIfNeeded(params: [String: Any], url: URL?) -> V2CallResult? {
-        guard let url,
-              url.scheme == CmuxDiffViewerURLSchemeHandler.scheme else {
-            return nil
-        }
-        guard let token = v2String(params, "diff_viewer_token"),
-              token == url.host,
-              let rawFiles = params["diff_viewer_files"] as? [[String: Any]],
-              !rawFiles.isEmpty,
-              rawFiles.count <= CmuxDiffViewerURLSchemeHandler.maxRegisteredFiles else {
-            return .err(code: "invalid_params", message: "Missing or invalid trusted diff viewer allowlist", data: nil)
-        }
-
-        let files = rawFiles.compactMap(CmuxDiffViewerURLSchemeHandler.registeredFile(from:))
-        guard files.count == rawFiles.count else {
-            return .err(code: "invalid_params", message: "Invalid trusted diff viewer allowlist", data: nil)
-        }
-
-        do {
-            try CmuxDiffViewerURLSchemeHandler.shared.register(token: token, files: files)
-            return nil
-        } catch {
-            return .err(
-                code: "invalid_params",
-                message: "Invalid trusted diff viewer allowlist",
-                data: ["details": error.localizedDescription]
-            )
-        }
-    }
 
     private nonisolated func v2BrowserNavigate(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {

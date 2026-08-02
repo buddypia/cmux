@@ -399,7 +399,7 @@ final class SidebarWorkspaceTableController: NSObject, NSTableViewDataSource, NS
         // Group headers carry their anchor's workspaceId; a header drag would
         // masquerade as dragging the anchor workspace and tear it out of the
         // group. Headers are not row-draggable in the SwiftUI sidebar either.
-        guard rows.indices.contains(row), !rows[row].isGroupHeader, let actions else { return nil }
+        guard rows.indices.contains(row), let actions else { return nil }
         let workspaceId = rows[row].workspaceId
         actions.beginWorkspaceDrag(workspaceId)
         workspaceDragSessionDidBegin()

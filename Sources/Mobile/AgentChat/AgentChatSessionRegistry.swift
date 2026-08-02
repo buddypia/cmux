@@ -334,6 +334,164 @@ final class AgentChatSessionRegistry {
     /// do this). Use that transcript fact only to clear an active working
     /// state; later hooks remain authoritative and can move the session
     /// back to working or needs-input.
+    /// Applies the working / needs-input / idle transitions the transcript tail
+    /// proved, for agents whose hooks are missing, partially installed, or
+    /// simply slower than their own log.
+    ///
+    /// This is the hook-independent half of live status: process discovery
+    /// proves an agent is *there*, the transcript proves what it is *doing*.
+    /// Mirrors Agent Studio's log-monitor FSM, which derives the same three
+    /// states straight from each CLI's JSONL rather than trusting hooks.
+    ///
+    /// Hook evidence still wins while it is fresher: an update is skipped when
+    /// its transcript row predates the last hook event for the session, so a
+    /// fully hooked agent keeps hook semantics and only an un-hooked one falls
+    /// through to the transcript. Ended sessions are never revived — their
+    /// transcript can still be re-read (paging history) and must not resurrect
+    /// a session whose process is gone.
+    func applyTranscriptStateUpdates(
+        sessionID: String,
+        updates: [ChatTranscriptStateUpdate]
+    ) {
+        guard !updates.isEmpty else { return }
+        for stateUpdate in ChatTranscriptStateUpdate.applicationOrder(updates) {
+            switch stateUpdate.kind {
+            case .working:
+                noteTranscriptWorking(sessionID: sessionID, at: stateUpdate.timestamp)
+            case .needsInput:
+                noteTranscriptNeedsInput(sessionID: sessionID, at: stateUpdate.timestamp)
+            case .inputResolved:
+                noteTranscriptInputResolved(sessionID: sessionID, at: stateUpdate.timestamp)
+            case .idle:
+                noteTranscriptWorkingResolved(sessionID: sessionID, at: stateUpdate.timestamp)
+            }
+        }
+    }
+
+    /// The transcript shows an unanswered permission request or question.
+    ///
+    /// Needs-input is the most actionable state a transcript can prove, so it
+    /// wins over any working state already recorded.
+    func noteTranscriptNeedsInput(sessionID: String, at timestamp: Date) {
+        applyTranscriptObservation(sessionID: sessionID, at: timestamp, isActivity: true) { record in
+            // An already-blocked session keeps its original `since`, matching
+            // how repeated permission hooks behave: the block started when it
+            // started, not when the transcript re-confirmed it.
+            guard !record.state.needsAttention else { return }
+            record.setTranscriptObservedState(.needsInput(since: timestamp))
+        }
+    }
+
+    /// The transcript shows the pending request was answered.
+    ///
+    /// Settles to idle rather than working: answering a prompt does not itself
+    /// prove the agent resumed, and the next tool row will say so if it did.
+    func noteTranscriptInputResolved(sessionID: String, at timestamp: Date) {
+        applyTranscriptObservation(sessionID: sessionID, at: timestamp, isActivity: false) { record in
+            guard case .needsInput = record.state else { return }
+            record.setTranscriptObservedState(.idle)
+        }
+    }
+
+    /// The transcript shows a tool or terminal command still running.
+    ///
+    /// Never overwrites an active needs-input: transcript rows for a running
+    /// tool can land after the permission row that blocked on it, and demoting
+    /// a blocked session to "working" would hide the thing the user must act on.
+    func noteTranscriptWorking(sessionID: String, at timestamp: Date) {
+        applyTranscriptObservation(sessionID: sessionID, at: timestamp, isActivity: true) { record in
+            guard !record.state.needsAttention else { return }
+            if case .working = record.state { return }
+            record.setTranscriptObservedState(.working(since: timestamp))
+        }
+    }
+
+    /// The transcript shows the agent's in-flight work settled.
+    ///
+    /// Only clears a working state — an idle session stays idle, and a blocked
+    /// one stays blocked (its `lastActivityAt` is left alone too, so a settling
+    /// tool cannot make a stale needs-input look freshly active).
+    func noteTranscriptWorkingResolved(sessionID: String, at timestamp: Date) {
+        applyTranscriptObservation(sessionID: sessionID, at: timestamp, isActivity: false) { record in
+            guard case .working = record.state else { return }
+            record.setTranscriptObservedState(.idle)
+        }
+    }
+
+    /// Shared guard + activity bump behind every `noteTranscript*` primitive.
+    ///
+    /// Ended sessions are never revived: their transcript can still be re-read
+    /// while paging history, and that must not resurrect a dead process. Hook
+    /// evidence wins while it is fresher, so an agent with working hooks keeps
+    /// hook semantics and only an un-hooked one falls through to the transcript.
+    ///
+    /// - Parameter isActivity: Whether the observation is evidence the agent
+    ///   *did* something (a prompt, a running tool) rather than evidence that
+    ///   something settled. Activity always restamps `lastActivityAt`; a
+    ///   settling observation restamps it only when it actually changed the
+    ///   state, so a tool finishing under a still-pending permission prompt
+    ///   cannot make that stale block look freshly active.
+    private func applyTranscriptObservation(
+        sessionID: String,
+        at timestamp: Date,
+        isActivity: Bool,
+        mutate: (inout AgentChatSessionRecord) -> Void
+    ) {
+        update(sessionID: sessionID) { record in
+            guard !Self.stateIsEnded(record.state) else { return }
+            if let hookAt = record.lastHookEventAt, timestamp <= hookAt { return }
+            let previousState = record.state
+            mutate(&record)
+            guard isActivity || record.state != previousState else { return }
+            if timestamp > record.lastActivityAt {
+                record.lastActivityAt = timestamp
+            }
+        }
+    }
+
+    /// Registers (or backfills) a session discovered without hooks — from the
+    /// process table, or from a transcript cmux found on its own.
+    ///
+    /// Presence alone says nothing about activity, so a newly adopted session
+    /// starts `idle` with no hook authority; the `noteTranscript*` primitives
+    /// move it from there.
+    func adoptDetectedSession(
+        sessionID: String,
+        agentKind: ChatAgentKind,
+        workspaceID: String?,
+        surfaceID: String?,
+        workingDirectory: String?,
+        transcriptPath: String?,
+        pid: Int? = nil,
+        at timestamp: Date
+    ) {
+        guard records[sessionID] == nil else {
+            update(sessionID: sessionID) { record in
+                if record.workspaceID == nil { record.workspaceID = workspaceID }
+                if record.surfaceID == nil { record.surfaceID = surfaceID }
+                if record.workingDirectory == nil { record.workingDirectory = workingDirectory }
+                if record.transcriptPath == nil { record.transcriptPath = transcriptPath }
+                if record.pid == nil { record.pid = pid }
+            }
+            return
+        }
+        var record = AgentChatSessionRecord(
+            sessionID: sessionID,
+            agentKind: agentKind,
+            workspaceID: workspaceID,
+            surfaceID: surfaceID,
+            workingDirectory: workingDirectory,
+            transcriptPath: transcriptPath,
+            state: .idle,
+            lastActivityAt: timestamp,
+            title: nil,
+            pid: pid
+        )
+        stampLifecycleTransition(previous: nil, current: &record, at: timestamp)
+        stampVersion(&record)
+        storeRecord(record, replacing: nil)
+    }
+
     func noteAssistantTurnCompleted(sessionID: String, at timestamp: Date) {
         update(sessionID: sessionID) { record in
             guard case .working = record.state else { return }
@@ -475,7 +633,10 @@ final class AgentChatSessionRegistry {
         record.lastActivityAt = event.receivedAt
 
         let previous = records[sessionID]
-        record.setHookLifecycleState(Self.nextState(previous: record.state, event: event))
+        record.setHookLifecycleState(
+            Self.nextState(previous: record.state, event: event),
+            at: event.receivedAt
+        )
         stampLifecycleTransition(previous: previous, current: &record, at: event.receivedAt)
         stampVersion(&record)
         storeRecord(record, replacing: previous)

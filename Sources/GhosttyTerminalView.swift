@@ -2646,7 +2646,7 @@ class GhosttyApp {
             }
 
             if action.tag == GHOSTTY_ACTION_RING_BELL {
-                performOnMain {
+                DispatchQueue.main.async {
                     self.ringBell()
                 }
                 return true
@@ -2655,7 +2655,7 @@ class GhosttyApp {
             if action.tag == GHOSTTY_ACTION_RELOAD_CONFIG {
                 let soft = action.action.reload_config.soft
                 logThemeAction("reload request target=app soft=\(soft)")
-                performOnMain {
+                DispatchQueue.main.async {
                     guard self.shouldProcessGhosttyReloadAction(
                         source: "action.reload_config.app",
                         soft: soft
@@ -2668,8 +2668,9 @@ class GhosttyApp {
             }
 
             if action.tag == GHOSTTY_ACTION_COLOR_CHANGE {
-                performOnMain {
-                    applyAppColorChange(action.action.color_change, source: "action.color_change.app")
+                let colorChange = action.action.color_change
+                DispatchQueue.main.async {
+                    self.applyAppColorChange(colorChange, source: "action.color_change.app")
                 }
                 return true
             }
@@ -2753,11 +2754,11 @@ class GhosttyApp {
                 return tabManager.createSplit(tabId: tabId, surfaceId: surfaceId, direction: direction) != nil
             }
         case GHOSTTY_ACTION_RING_BELL:
-            performOnMain { self.ringBell() }
+            DispatchQueue.main.async { self.ringBell() }
             return true
-        case GHOSTTY_ACTION_SELECTION_CHANGED:
+        /* case GHOSTTY_ACTION_SELECTION_CHANGED:
             surfaceView.selectionAccessibilitySignal.request()
-            return true
+            return true */
         case GHOSTTY_ACTION_GOTO_SPLIT:
             guard let tabId = surfaceView.tabId,
                   let surfaceId = surfaceView.terminalSurface?.id,
@@ -2880,12 +2881,7 @@ class GhosttyApp {
             return true
         case GHOSTTY_ACTION_PWD:
             let pwdAction = action.action.pwd
-            let geometry = pwdAction.scrollbar.map {
-                NotificationScrollRestoreGeometry(
-                    scrollbar: GhosttyScrollbar(c: $0.pointee),
-                    rowSpaceRevision: pwdAction.scrollbar_revision
-                )
-            }
+            let geometry: NotificationScrollRestoreGeometry? = nil
             handleCurrentDirectoryAction(
                 pwdAction.pwd.flatMap { String(cString: $0) } ?? "",
                 authoritativeGeometry: geometry,
@@ -2970,9 +2966,9 @@ class GhosttyApp {
             logThemeAction(
                 "reload request target=surface tab=\(surfaceView.tabId?.uuidString ?? "nil") surface=\(surfaceView.terminalSurface?.id.uuidString ?? "nil") soft=\(soft)"
             )
-            return performOnMain {
+            DispatchQueue.main.async {
                 guard self.shouldProcessGhosttyReloadAction(source: source, soft: soft) else {
-                    return true
+                    return
                 }
                 let preferredColorScheme = self.effectiveTerminalColorSchemePreference
                 surfaceView.terminalSurface?.hostedView.reapplySurfaceColorSchemeAfterGhosttyConfigReload(
@@ -2986,18 +2982,20 @@ class GhosttyApp {
                 )
                 surfaceView.terminalSurface?.hostedView.refreshHostBackgroundAfterGhosttyConfigReload()
                 surfaceView.terminalSurface?.forceRefresh(reason: "surface.reloadConfig")
-                return true
             }
+            return true
         case GHOSTTY_ACTION_KEY_SEQUENCE:
-            return performOnMain {
-                surfaceView.updateKeySequence(action.action.key_sequence)
-                return true
+            let keySeq = action.action.key_sequence
+            DispatchQueue.main.async {
+                surfaceView.updateKeySequence(keySeq)
             }
+            return true
         case GHOSTTY_ACTION_KEY_TABLE:
-            return performOnMain {
-                surfaceView.updateKeyTable(action.action.key_table)
-                return true
+            let keyTable = action.action.key_table
+            DispatchQueue.main.async {
+                surfaceView.updateKeyTable(keyTable)
             }
+            return true
         case GHOSTTY_ACTION_OPEN_URL:
             let openUrl = action.action.open_url
             guard let cstr = openUrl.url else { return false }
@@ -3326,6 +3324,39 @@ extension TerminalSurface {
 // MARK: - Ghostty Surface View
 
 class GhosttyNSView: NSView, NSUserInterfaceValidations {
+    // MARK: Scrollbar runtime seam
+
+    // Declared in the class body (not an extension) so the scroll-restore
+    // tests can subclass and stub the Ghostty runtime. Swift only dispatches
+    // extension methods dynamically through `@objc`, and these signatures
+    // cannot be `@objc`: `ghostty_surface_scrollbar_s` comes from the
+    // CmuxTerminalCore Swift module, which is not Objective-C representable.
+
+    /// Reads the surface's authoritative scrollbar geometry from the runtime.
+    func readAuthoritativeScrollbar(
+        _ result: UnsafeMutablePointer<ghostty_surface_scrollbar_s>
+    ) -> Bool {
+        guard let surface = terminalSurface?.surface else { return false }
+        return GhosttyRuntimeCInterop.scrollbar(surface, result)
+    }
+
+    /// Scrolls to `row`, but only while the surface's row space still matches
+    /// `rowSpaceRevision` — a reflow between capture and restore invalidates
+    /// the recorded row.
+    func scrollToRow(
+        _ row: UInt64,
+        ifRowSpaceRevisionMatches rowSpaceRevision: UInt64,
+        result: UnsafeMutablePointer<ghostty_surface_scrollbar_s>
+    ) -> Bool {
+        guard let surface = terminalSurface?.surface else { return false }
+        return GhosttyRuntimeCInterop.scrollToRowIfRevision(
+            surface,
+            row: row,
+            rowSpaceRevision: rowSpaceRevision,
+            result: result
+        )
+    }
+
     private static let focusDebugEnabled: Bool = {
         if ProcessInfo.processInfo.environment["CMUX_FOCUS_DEBUG"] == "1" {
             return true

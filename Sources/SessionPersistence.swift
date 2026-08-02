@@ -234,6 +234,22 @@ struct SessionStatusEntrySnapshot: Codable, Sendable {
     var timestamp: TimeInterval
 }
 
+/// A surface's last agent status, carried across an app restart.
+///
+/// Live status entries and agent PIDs are deliberately *not* restored — the
+/// processes that set them are gone. This snapshot is the read-only residue:
+/// enough to tell the user which CLI last ran on the tab, what state it ended
+/// in, and what it said, without pretending the process is still alive.
+struct SessionAgentSurfaceStatusSnapshot: Codable, Sendable {
+    /// `AgentTabTitleStatus.rawValue` — the marker, not the raw lifecycle state,
+    /// because the three display states are what both consumers render.
+    var status: String
+    /// Agent status key (`claude_code`, `codex`, …).
+    var agentKey: String
+    /// The agent's last conversation output on this surface.
+    var lastMessage: String?
+}
+
 struct SessionLogEntrySnapshot: Codable, Sendable {
     var message: String
     var level: String
@@ -1644,6 +1660,7 @@ struct SessionPanelSnapshot: Codable, Sendable {
     var agentSession: SessionAgentSessionPanelSnapshot? = nil
     var project: SessionProjectPanelSnapshot?
     var workspaceTodo: SessionWorkspaceTodoPanelSnapshot? = nil
+    var agentStatus: SessionAgentSurfaceStatusSnapshot? = nil
 }
 
 extension SessionPanelSnapshot: WorkspaceSessionRemoteRestorePanelSnapshot {}
