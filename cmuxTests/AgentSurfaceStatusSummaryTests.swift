@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 #if canImport(cmux_DEV)
@@ -298,6 +299,60 @@ final class AgentSurfaceStatusSummaryTests: XCTestCase {
         XCTAssertTrue(label.contains("Claude Code"), label)
         XCTAssertTrue(label.contains(AgentTabTitleStatus.running.badgeLabel), label)
         XCTAssertTrue(label.contains(AgentTabTitleStatus.done.badgeLabel), label)
+    }
+
+    // MARK: - Pill tint
+
+    @MainActor
+    func testPillTintDistinguishesWorkingFromDone() {
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        let working = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        let done = SidebarAgentStatusBadgeTint.fill(for: .done, isActive: false, neutral: neutral)
+
+        XCTAssertNotEqual(working, done)
+        XCTAssertNotEqual(working, neutral)
+        XCTAssertNotEqual(done, neutral)
+    }
+
+    @MainActor
+    func testAnIdleOrEmptyGroupKeepsTheRowsNeutralFill() {
+        // "Launched but never ran" is the absence of news, not a state worth
+        // colouring — and a group with no counts must not invent a colour.
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+
+        XCTAssertEqual(SidebarAgentStatusBadgeTint.fill(for: .idle, isActive: false, neutral: neutral), neutral)
+        XCTAssertEqual(SidebarAgentStatusBadgeTint.fill(for: nil, isActive: false, neutral: neutral), neutral)
+    }
+
+    @MainActor
+    func testTheTintCarriesMoreAlphaOnTheSelectedRow() {
+        // The selected row already has an accent background, so the wash needs
+        // more alpha to survive on it.
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        let inactive = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        let active = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: true, neutral: neutral)
+
+        XCTAssertGreaterThan(active.alphaComponent, inactive.alphaComponent)
+    }
+
+    @MainActor
+    func testTheTintTracksTheGroupsLeadingStatus() {
+        // A CLI with both working and done surfaces paints as "working": the
+        // pill's colour answers "is this one still busy?".
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [
+            summary(.done, agentKey: "claude_code"),
+            summary(.running, agentKey: "claude_code"),
+        ])
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+
+        XCTAssertEqual(groups[0].leadingStatus, .running)
+        XCTAssertEqual(
+            SidebarAgentStatusBadgeTint.fill(for: groups[0].leadingStatus, isActive: false, neutral: neutral),
+            SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        )
+        // …and the text still spells out both counts, so nothing is conveyed by
+        // colour alone.
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ⚡1 ✅1")
     }
 
     // MARK: - Latest output

@@ -60,6 +60,44 @@ final class SidebarRowAgentStatusPill: NSView {
     }
 }
 
+/// Background tint for one CLI's pill, keyed on the most actionable state that
+/// CLI is in.
+///
+/// Colour is what makes the strip scannable: with every pill on the same grey a
+/// row of five workspaces has to be *read* to answer "is anything still
+/// running", and at 9pt the status emoji is too small to carry that alone. The
+/// tint is a low-alpha wash rather than a solid fill so the pill still reads as
+/// a badge on the row, and it never replaces the emoji — the marker and the
+/// counts stay, so nothing is conveyed by colour alone.
+///
+/// Kept beside the text helpers, and derived only from values the caller passes
+/// in, so the AppKit row and the SwiftUI fallback row cannot drift apart and no
+/// colour is resolved against the current window appearance.
+enum SidebarAgentStatusBadgeTint {
+    /// - Parameters:
+    ///   - status: The group's leading status, or `nil` for a group with no counts.
+    ///   - isActive: Whether the row is selected. The selected row already has an
+    ///     accent background, so the wash needs more alpha to survive on it.
+    ///   - neutral: The row's ordinary badge fill, used for idle and unknown —
+    ///     "launched but never ran" is the absence of news, not a state worth
+    ///     colouring.
+    static func fill(
+        for status: AgentTabTitleStatus?,
+        isActive: Bool,
+        neutral: NSColor
+    ) -> NSColor {
+        let alpha: CGFloat = isActive ? 0.38 : 0.24
+        switch status {
+        case .running:
+            return NSColor(srgbRed: 1.00, green: 0.72, blue: 0.16, alpha: alpha)
+        case .done:
+            return NSColor(srgbRed: 0.24, green: 0.76, blue: 0.44, alpha: alpha)
+        case .idle, nil:
+            return neutral
+        }
+    }
+}
+
 /// Formatting for the agent-status badge strip, kept out of the view so the
 /// AppKit row and the SwiftUI fallback row render identical text and tooltips.
 enum SidebarAgentStatusBadgeText {

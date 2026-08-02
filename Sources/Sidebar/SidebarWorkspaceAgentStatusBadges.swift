@@ -10,7 +10,10 @@ struct SidebarWorkspaceAgentStatusBadges: View {
     let groups: [AgentStatusBadgeGroup]
     let fontSize: CGFloat
     let textColor: Color
-    let fillColor: Color
+    /// The idle/unknown fill. Working and done groups tint away from it through
+    /// ``SidebarAgentStatusBadgeTint``, which the AppKit row uses too.
+    let neutralFillColor: NSColor
+    let isActive: Bool
 
     var body: some View {
         if groups.isEmpty {
@@ -25,7 +28,11 @@ struct SidebarWorkspaceAgentStatusBadges: View {
                         .truncationMode(.tail)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
-                        .background(Capsule().fill(fillColor))
+                        .background(Capsule().fill(Color(nsColor: SidebarAgentStatusBadgeTint.fill(
+                            for: group.leadingStatus,
+                            isActive: isActive,
+                            neutral: neutralFillColor
+                        ))))
                         .opacity(group.isRestored ? 0.62 : 1.0)
                         .safeHelp(SidebarAgentStatusBadgeText.tooltip(for: group))
                 }
