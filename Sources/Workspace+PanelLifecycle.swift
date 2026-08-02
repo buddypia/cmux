@@ -161,6 +161,15 @@ extension Workspace {
         return String(key[..<dotIndex])
     }
 
+    /// Whether any PID key still bound to `panelId` resolves to `statusKey`.
+    ///
+    /// Panel-scoped on purpose: the lifecycle map is keyed by surface, so a live
+    /// agent on a *different* surface must not keep a dead one's marker alive here.
+    private func hasAgentRuntime(forStatusKey statusKey: String, onPanel panelId: UUID) -> Bool {
+        guard let keys = agentPIDKeysByPanelId[panelId] else { return false }
+        return keys.contains { agentStatusKey(forAgentPIDKey: $0) == statusKey }
+    }
+
     private func hasAgentRuntime(forStatusKey statusKey: String) -> Bool {
         for key in agentPIDs.keys where agentStatusKey(forAgentPIDKey: key) == statusKey {
             return true
@@ -364,7 +373,16 @@ extension Workspace {
         if let changedPanelId = ownedPanelId ?? panelId, didChange { AgentHibernationController.shared.recordAgentProcessChange(workspaceId: id, panelId: changedPanelId) }
         if let lifecyclePanelId = ownedPanelId ?? panelId {
             let lifecycleStatusKey = agentStatusKey(forAgentPIDKey: key)
-            if clearAgentLifecycle(key: lifecycleStatusKey, panelId: lifecyclePanelId) {
+            // A relaunched CLI keeps its previous `<statusKey>.<pid>` key on the
+            // surface — `recordAgentPIDOwnership` prunes only siblings whose
+            // status key differs — so retiring the dead PID must not take the
+            // lifecycle entry the live sibling still owns. Without this guard the
+            // 30s stale-PID sweep strips a running agent's tab marker and its
+            // sidebar pill, and nothing restores them until its next hook report.
+            // Mirrors the guard the `statusEntries` removal below already uses,
+            // scoped to the panel because the lifecycle map is per surface.
+            if !hasAgentRuntime(forStatusKey: lifecycleStatusKey, onPanel: lifecyclePanelId),
+               clearAgentLifecycle(key: lifecycleStatusKey, panelId: lifecyclePanelId) {
                 didChange = true
             }
         }
