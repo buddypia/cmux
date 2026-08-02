@@ -418,6 +418,132 @@ struct WorkspaceSidebarObservationTests {
             ) == 2
         )
     }
+
+    // MARK: - Generic agent idle rows vs. the per-CLI badge strip
+
+    private static func makeSettings() -> SidebarTabItemSettingsSnapshot {
+        SidebarTabItemSettingsSnapshot(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+    }
+
+    private static func makeSnapshot(
+        for workspace: Workspace
+    ) -> SidebarWorkspaceSnapshotBuilder.Snapshot {
+        SidebarWorkspaceSnapshotFactory(
+            workspace: workspace,
+            settings: makeSettings(),
+            showsAgentActivity: true
+        ).makeSnapshot()
+    }
+
+    /// Exactly what the agent hooks send to clear a running status:
+    /// `set_status <key> Idle --icon=pause.circle.fill --color=#8E8E93`.
+    private static func idlePlaceholderEntry(key: String) -> SidebarStatusEntry {
+        SidebarStatusEntry(key: key, value: "Idle", icon: "pause.circle.fill", color: "#8E8E93")
+    }
+
+    /// A finished agent on `panelId`, reported through both lanes the sidebar
+    /// reads: the lifecycle map (which feeds the badge) and an owning PID
+    /// (which is what makes the hook's status row visible at all).
+    private static func bindFinishedAgent(
+        _ workspace: Workspace,
+        statusKey: String,
+        panelId: UUID
+    ) {
+        workspace.setAgentLifecycle(key: statusKey, panelId: panelId, lifecycle: .running)
+        workspace.setAgentLifecycle(key: statusKey, panelId: panelId, lifecycle: .idle)
+        workspace.recordAgentPID(
+            key: "\(statusKey).session-a",
+            pid: 4_242,
+            panelId: panelId,
+            refreshPorts: false
+        )
+    }
+
+    @Test func genericAgentIdleRowIsDroppedWhenTheBadgeStripAlreadyReportsThatCLI() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+        Self.bindFinishedAgent(workspace, statusKey: "codex", panelId: panelId)
+        workspace.statusEntries["codex"] = Self.idlePlaceholderEntry(key: "codex")
+        workspace.statusEntries["deploy"] = SidebarStatusEntry(
+            key: "deploy",
+            value: "Staging",
+            icon: "arrow.up.circle",
+            color: "#4C8DFF"
+        )
+
+        let snapshot = Self.makeSnapshot(for: workspace)
+
+        #expect(
+            snapshot.agentStatusGroups.contains { $0.agentKey == "codex" },
+            "Precondition: the badge strip reports Codex for this surface."
+        )
+        #expect(
+            snapshot.metadataEntries.contains { $0.key == "deploy" },
+            "Precondition: this settings snapshot shows status rows, so an absent Codex row means it was filtered."
+        )
+        #expect(
+            !snapshot.metadataEntries.contains { $0.key == "codex" },
+            "The hook's generic Idle row only repeats what the Codex badge says, and its 'Idle' contradicts the strip's 💤."
+        )
+    }
+
+    @Test func genericAgentIdleRowIsDroppedForACLIWhoseStatusKeyDiffersFromItsBadgeKey() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+        Self.bindFinishedAgent(workspace, statusKey: "claude_code", panelId: panelId)
+        workspace.statusEntries["claude_code"] = Self.idlePlaceholderEntry(key: "claude_code")
+
+        let snapshot = Self.makeSnapshot(for: workspace)
+
+        #expect(
+            snapshot.agentStatusGroups.contains { $0.agentKey == "claude" },
+            "Precondition: the badge strip canonicalizes claude_code to the claude definition id."
+        )
+        #expect(
+            !snapshot.metadataEntries.contains { $0.key == "claude_code" },
+            "The row and the badge must be matched on the canonical CLI id, not on the raw status key."
+        )
+    }
+
+    @Test func agentStatusRowWithRealContentSurvivesTheBadgeStrip() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+        Self.bindFinishedAgent(workspace, statusKey: "codex", panelId: panelId)
+        workspace.statusEntries["codex"] = SidebarStatusEntry(
+            key: "codex",
+            value: "Waiting for review",
+            icon: "bolt.fill",
+            color: "#4C8DFF"
+        )
+
+        let snapshot = Self.makeSnapshot(for: workspace)
+
+        #expect(
+            snapshot.metadataEntries.contains { $0.key == "codex" },
+            "Only the generic idle placeholder is redundant; a status that says something must still be shown."
+        )
+    }
+
+    @Test func genericAgentIdleRowStaysWhenNoBadgeCoversThatCLI() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+        // PID but no lifecycle state: the hook reported a status without ever
+        // reporting a lifecycle, so the strip has nothing to draw and the row
+        // is the only agent status the sidebar has.
+        workspace.recordAgentPID(key: "codex.session-a", pid: 4_242, panelId: panelId, refreshPorts: false)
+        workspace.statusEntries["codex"] = Self.idlePlaceholderEntry(key: "codex")
+
+        let snapshot = Self.makeSnapshot(for: workspace)
+
+        #expect(
+            snapshot.agentStatusGroups.isEmpty,
+            "Precondition: no badge is drawn for a surface with no agent lifecycle state."
+        )
+        #expect(
+            snapshot.metadataEntries.contains { $0.key == "codex" },
+            "With no badge to defer to, dropping the idle row would remove the sidebar's only agent status."
+        )
+    }
 }
 
 // Mutable flag captured by Observation's Sendable onChange closure in this test.
