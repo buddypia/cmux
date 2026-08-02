@@ -70,6 +70,30 @@ enum AgentStatusKeyDisplayName {
         return String(firstWord)
     }
 
+    /// Abbreviations for the sidebar's agent-status strip, where a pill has to
+    /// fit a CLI name *and* its per-status counts inside a sidebar row.
+    ///
+    /// Only CLIs whose short form is already how people write them are listed;
+    /// inventing an abbreviation for the rest would cost more legibility than
+    /// the width it buys, so everything else falls back to the first word of
+    /// the display name.
+    private static let badgeDisplayNameOverrides: [String: String] = [
+        "antigravity": "Agy",
+        "claude": "CC",
+        "codex": "Cdx",
+    ]
+
+    /// The name the sidebar status pill draws, e.g. `claude_code` → `CC`.
+    ///
+    /// Deliberately separate from ``shortDisplayName(forStatusKey:)``: a tab
+    /// title has room to say `Claude`, and tooltips and the accessibility label
+    /// still say `Claude Code`, so the abbreviation never becomes the only
+    /// place the CLI is named.
+    static func badgeDisplayName(forStatusKey key: String) -> String {
+        let definitionId = canonicalDefinitionId(forStatusKey: key)
+        return badgeDisplayNameOverrides[definitionId] ?? shortDisplayName(forStatusKey: key)
+    }
+
     private static func titleCased(_ key: String) -> String {
         key
             .split(whereSeparator: { $0 == "_" || $0 == "-" })
@@ -196,9 +220,10 @@ struct AgentStatusBadgeGroup: Equatable, Sendable, Identifiable {
 
     var id: String { agentKey }
     var displayName: String { AgentStatusKeyDisplayName.displayName(forStatusKey: agentKey) }
-    /// Short name for the pill itself, matching what the surface tab title
-    /// stamps so the two surfaces name the same CLI the same way.
-    var shortDisplayName: String { AgentStatusKeyDisplayName.shortDisplayName(forStatusKey: agentKey) }
+    /// Abbreviated name for the pill itself (`CC`, `Cdx`, `Agy`), so the name
+    /// and the counts both fit a sidebar row. The full name still leads the
+    /// tooltip and the accessibility label.
+    var badgeDisplayName: String { AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: agentKey) }
     /// How many of the workspace's surfaces this CLI owns.
     var surfaceCount: Int { badges.reduce(0) { $0 + $1.count } }
     /// The same rule the per-status pills use, one level up: the group reads as

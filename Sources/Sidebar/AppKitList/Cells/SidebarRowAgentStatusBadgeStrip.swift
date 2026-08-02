@@ -63,16 +63,16 @@ final class SidebarRowAgentStatusPill: NSView {
 /// Formatting for the agent-status badge strip, kept out of the view so the
 /// AppKit row and the SwiftUI fallback row render identical text and tooltips.
 enum SidebarAgentStatusBadgeText {
-    /// The pill's own text, e.g. `Claude ⚡2 ✅1`.
+    /// The pill's own text, e.g. `CC ⚡2 ✅1`.
     ///
-    /// The CLI name leads because the pill answers "which CLI, in what state" in
-    /// that order, and because the markers are the part that must survive tail
-    /// truncation intact — they carry the counts.
+    /// The abbreviated CLI name leads because the pill answers "which CLI, in
+    /// what state" in that order, and because the markers are the part that must
+    /// survive tail truncation intact — they carry the counts.
     static func pillText(for group: AgentStatusBadgeGroup) -> String {
         let counts = group.badges
             .map { "\($0.status.rawValue)\($0.count)" }
             .joined(separator: " ")
-        return "\(group.shortDisplayName) \(counts)"
+        return "\(group.badgeDisplayName) \(counts)"
     }
 
     /// Tooltip for one pill: which CLI, how many of its surfaces are in each

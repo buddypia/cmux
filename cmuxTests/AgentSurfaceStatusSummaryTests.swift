@@ -220,7 +220,40 @@ final class AgentSurfaceStatusSummaryTests: XCTestCase {
             summary(.done, agentKey: "claude_code"),
         ])
 
-        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "Claude ⚡2 ✅1")
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ⚡2 ✅1")
+    }
+
+    func testPillTextAbbreviatesTheCLIsThatHaveACommonShortForm() {
+        // The pill carries a name AND its counts inside a sidebar row, so the
+        // three CLIs people already abbreviate get their short form.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "claude_code"), "CC")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "codex"), "Cdx")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "antigravity"), "Agy")
+        // PID and writer-namespace spellings resolve to the same abbreviation.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "claude_code.4821"), "CC")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "agentchat.codex"), "Cdx")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "antigravity.tui"), "Agy")
+    }
+
+    func testPillTextFallsBackToTheShortNameForEveryOtherCLI() {
+        // Inventing an abbreviation for the rest would cost more legibility than
+        // the width it buys, so they keep the first word of the display name.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "gemini"), "Gemini")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "rovodev"), "Rovo")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "some_new_cli"), "Some")
+    }
+
+    func testTheAbbreviationNeverBecomesTheOnlyPlaceTheCLIIsNamed() {
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [summary(.done, agentKey: "claude_code")])
+
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ✅1")
+        // The full name still leads the tooltip and the accessibility label.
+        XCTAssertTrue(SidebarAgentStatusBadgeText.tooltip(for: groups[0]).hasPrefix("Claude Code "))
+        XCTAssertTrue(
+            SidebarAgentStatusBadgeText.accessibilityLabel(for: groups).contains("Claude Code")
+        )
+        // …and the tab title keeps saying `Claude`, which has room for it.
+        XCTAssertEqual(AgentStatusKeyDisplayName.shortDisplayName(forStatusKey: "claude_code"), "Claude")
     }
 
     // The tooltip and accessibility strings are localized, so they are asserted
