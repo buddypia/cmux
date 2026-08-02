@@ -15049,9 +15049,10 @@ struct TabItemView: View, Equatable {
                 groups: agentStatusGroups,
                 fontSize: scaledFontSize(9),
                 textColor: activeSecondaryColor(0.92),
-                fillColor: Color(nsColor: usesInvertedActiveForeground
+                neutralFillColor: usesInvertedActiveForeground
                     ? selectedWorkspaceForegroundNSColor(opacity: 0.16)
-                    : NSColor.secondaryLabelColor.withAlphaComponent(0.12))
+                    : NSColor.secondaryLabelColor.withAlphaComponent(0.12),
+                isActive: usesInvertedActiveForeground
             )
 
             if let subtitle = displayedSubtitle {

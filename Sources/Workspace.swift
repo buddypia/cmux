@@ -449,7 +449,12 @@ extension Workspace {
             resumeBinding: resumeBinding
         )
 
-        let panelTitle = panelTitle(panelId: panelId)
+        // Persist the bare name. `panelTitle(panelId:)` is the *displayed* title,
+        // marker and CLI name included, and those are derived state — storing them
+        // makes the next restore re-apply a stale `✅ Codex · ` as if it were part
+        // of the title, and a CLI name that is not in `knownAgentTitleNames` can
+        // never be peeled back off.
+        let panelTitle = panelTitle(panelId: panelId).map { AgentTabTitleStatus.undecorated($0) }
         let customTitle = panelCustomTitles[panelId]
         let customTitleSource: CustomTitleSource? = customTitle != nil
             ? (panelCustomTitleSources[panelId] ?? .user)
@@ -1683,7 +1688,13 @@ extension Workspace {
     func applySessionPanelMetadata(_ snapshot: SessionPanelSnapshot, toPanelId panelId: UUID) {
         adoptPersistedStableSurfaceId(from: snapshot, panelId: panelId)
 
-        if let title = snapshot.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+        // Strip on the way in too: sessions written by an earlier build stored the
+        // decorated title, and `panelTitles` is the undecorated base every title
+        // path re-decorates from.
+        if let title = snapshot.title
+            .map({ AgentTabTitleStatus.undecorated($0) })?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !title.isEmpty {
             panelTitles[panelId] = title
         }
 

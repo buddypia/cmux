@@ -473,7 +473,7 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
         Self.pool(&agentStatusPills, count: groups.count, parent: self) { SidebarRowAgentStatusPill() }
         guard !groups.isEmpty else { return }
         let font = NSFont.monospacedDigitSystemFont(ofSize: model.scaled(9), weight: .semibold)
-        let fill = model.isActive
+        let neutralFill = model.isActive
             ? palette.selectedForeground(0.16)
             : NSColor.secondaryLabelColor.withAlphaComponent(0.12)
         for (index, group) in groups.enumerated() {
@@ -481,7 +481,11 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
                 group: group,
                 font: font,
                 textColor: palette.secondary(0.92),
-                fillColor: fill,
+                fillColor: SidebarAgentStatusBadgeTint.fill(
+                    for: group.leadingStatus,
+                    isActive: model.isActive,
+                    neutral: neutralFill
+                ),
                 toolTip: SidebarAgentStatusBadgeText.tooltip(for: group)
             )
         }

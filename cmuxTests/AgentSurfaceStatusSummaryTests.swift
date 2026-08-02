@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 #if canImport(cmux_DEV)
@@ -220,7 +221,40 @@ final class AgentSurfaceStatusSummaryTests: XCTestCase {
             summary(.done, agentKey: "claude_code"),
         ])
 
-        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "Claude ⚡2 ✅1")
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ⚡2 ✅1")
+    }
+
+    func testPillTextAbbreviatesTheCLIsThatHaveACommonShortForm() {
+        // The pill carries a name AND its counts inside a sidebar row, so the
+        // three CLIs people already abbreviate get their short form.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "claude_code"), "CC")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "codex"), "Cdx")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "antigravity"), "Agy")
+        // PID and writer-namespace spellings resolve to the same abbreviation.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "claude_code.4821"), "CC")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "agentchat.codex"), "Cdx")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "antigravity.tui"), "Agy")
+    }
+
+    func testPillTextFallsBackToTheShortNameForEveryOtherCLI() {
+        // Inventing an abbreviation for the rest would cost more legibility than
+        // the width it buys, so they keep the first word of the display name.
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "gemini"), "Gemini")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "rovodev"), "Rovo")
+        XCTAssertEqual(AgentStatusKeyDisplayName.badgeDisplayName(forStatusKey: "some_new_cli"), "Some")
+    }
+
+    func testTheAbbreviationNeverBecomesTheOnlyPlaceTheCLIIsNamed() {
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [summary(.done, agentKey: "claude_code")])
+
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ✅1")
+        // The full name still leads the tooltip and the accessibility label.
+        XCTAssertTrue(SidebarAgentStatusBadgeText.tooltip(for: groups[0]).hasPrefix("Claude Code "))
+        XCTAssertTrue(
+            SidebarAgentStatusBadgeText.accessibilityLabel(for: groups).contains("Claude Code")
+        )
+        // …and the tab title keeps saying `Claude`, which has room for it.
+        XCTAssertEqual(AgentStatusKeyDisplayName.shortDisplayName(forStatusKey: "claude_code"), "Claude")
     }
 
     // The tooltip and accessibility strings are localized, so they are asserted
@@ -265,6 +299,60 @@ final class AgentSurfaceStatusSummaryTests: XCTestCase {
         XCTAssertTrue(label.contains("Claude Code"), label)
         XCTAssertTrue(label.contains(AgentTabTitleStatus.running.badgeLabel), label)
         XCTAssertTrue(label.contains(AgentTabTitleStatus.done.badgeLabel), label)
+    }
+
+    // MARK: - Pill tint
+
+    @MainActor
+    func testPillTintDistinguishesWorkingFromDone() {
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        let working = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        let done = SidebarAgentStatusBadgeTint.fill(for: .done, isActive: false, neutral: neutral)
+
+        XCTAssertNotEqual(working, done)
+        XCTAssertNotEqual(working, neutral)
+        XCTAssertNotEqual(done, neutral)
+    }
+
+    @MainActor
+    func testAnIdleOrEmptyGroupKeepsTheRowsNeutralFill() {
+        // "Launched but never ran" is the absence of news, not a state worth
+        // colouring — and a group with no counts must not invent a colour.
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+
+        XCTAssertEqual(SidebarAgentStatusBadgeTint.fill(for: .idle, isActive: false, neutral: neutral), neutral)
+        XCTAssertEqual(SidebarAgentStatusBadgeTint.fill(for: nil, isActive: false, neutral: neutral), neutral)
+    }
+
+    @MainActor
+    func testTheTintCarriesMoreAlphaOnTheSelectedRow() {
+        // The selected row already has an accent background, so the wash needs
+        // more alpha to survive on it.
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        let inactive = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        let active = SidebarAgentStatusBadgeTint.fill(for: .running, isActive: true, neutral: neutral)
+
+        XCTAssertGreaterThan(active.alphaComponent, inactive.alphaComponent)
+    }
+
+    @MainActor
+    func testTheTintTracksTheGroupsLeadingStatus() {
+        // A CLI with both working and done surfaces paints as "working": the
+        // pill's colour answers "is this one still busy?".
+        let groups = AgentStatusBadgeSummary.cliGroups(from: [
+            summary(.done, agentKey: "claude_code"),
+            summary(.running, agentKey: "claude_code"),
+        ])
+        let neutral = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+
+        XCTAssertEqual(groups[0].leadingStatus, .running)
+        XCTAssertEqual(
+            SidebarAgentStatusBadgeTint.fill(for: groups[0].leadingStatus, isActive: false, neutral: neutral),
+            SidebarAgentStatusBadgeTint.fill(for: .running, isActive: false, neutral: neutral)
+        )
+        // …and the text still spells out both counts, so nothing is conveyed by
+        // colour alone.
+        XCTAssertEqual(SidebarAgentStatusBadgeText.pillText(for: groups[0]), "CC ⚡1 ✅1")
     }
 
     // MARK: - Latest output

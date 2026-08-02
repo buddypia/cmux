@@ -274,6 +274,51 @@ struct AgentHibernationTests {
         expectEqual(workspace.agentHibernationLifecycleState(panelId: secondPanelId, fallback: nil), .running)
     }
 
+    /// Relaunching a CLI on a surface leaves the dead run's `<statusKey>.<pid>`
+    /// key next to the live one — `recordAgentPIDOwnership` only prunes siblings
+    /// whose status key *differs*. When the 30s sweep retires the dead key it
+    /// must not take the shared lifecycle entry with it, or the live agent
+    /// silently loses its tab marker and its sidebar status pill and does not
+    /// get them back until its next hook report.
+    @MainActor
+    @Test
+    func testClearingOneAgentPIDKeepsLifecycleWhenAnotherPIDOnTheSamePanelSharesTheStatusKey() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+
+        workspace.recordAgentPID(key: "codex.dead", pid: 111, panelId: panelId, refreshPorts: false)
+        workspace.recordAgentPID(key: "codex.live", pid: 222, panelId: panelId, refreshPorts: false)
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .running)
+
+        workspace.clearAgentPID(key: "codex.dead", panelId: panelId, clearStatus: true, refreshPorts: false)
+
+        expectEqual(workspace.agentHibernationLifecycleState(panelId: panelId, fallback: nil), .running)
+        expectEqual(workspace.agentTabTitleStatus(forPanelId: panelId), .running)
+    }
+
+    /// The tab marker is derived state. Persisting the *decorated* title bakes
+    /// it into the base string, so a restore re-applies a stale marker and CLI
+    /// name as if the user had typed them — and for a CLI whose name is not in
+    /// `knownAgentTitleNames` the segment can never be peeled off again.
+    @MainActor
+    @Test
+    func testSessionSnapshotPersistsTheUndecoratedPanelTitle() throws {
+        let workspace = Workspace()
+        let panelId = try #require(workspace.focusedPanelId)
+
+        workspace.setPanelCustomTitle(panelId: panelId, title: "api-server")
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .running)
+
+        // The live tab is decorated…
+        expectEqual(workspace.panelTitle(panelId: panelId), "⚡ Codex · api-server")
+
+        // …but what goes to disk must be the bare name.
+        let snapshot = try #require(
+            workspace.sessionSnapshot(includeScrollback: false).panels.first { $0.id == panelId }
+        )
+        expectEqual(snapshot.title, "api-server")
+    }
+
     @Test
     func testSessionIndexLoadsAgentLifecycleFromHookStore() throws {
         let home = FileManager.default.temporaryDirectory
