@@ -156,6 +156,13 @@ final class TerminalNotificationStore: ObservableObject {
         var unreadByTabSurface = Set<TabSurfaceKey>()
         var latestUnreadByTabId: [UUID: TerminalNotification] = [:]
         var latestByTabId: [UUID: TerminalNotification] = [:]
+        /// Distinct surfaces per workspace that are sitting on the same unread
+        /// notification text, keyed by that text. Feeds the sidebar's `×N`
+        /// multiplier so a workspace running three agent CLIs shows one
+        /// "… is ready for input ×3" line instead of only the newest of three
+        /// identical subtitles. Surfaceless notifications collapse under the
+        /// workspace itself, so they can never inflate the count past one.
+        var unreadSurfacesByTabIdAndText: [UUID: [String: Set<UUID>]] = [:]
     }
 
     static let shared = TerminalNotificationStore()
@@ -523,11 +530,17 @@ final class TerminalNotificationStore: ObservableObject {
         result.reserveCapacity(ids.count)
         for id in ids {
             let count = unreadCount(forTabId: id)
-            let latestText: String? = indexes.latestByTabId[id].flatMap { notification in
-                let text = notification.body.isEmpty ? notification.title : notification.body
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
+            // Repeat the newest body once with a `×N` multiplier instead of
+            // letting the newest of N identical surface notifications be the
+            // only one the row ever shows.
+            let latestText: String? = indexes.latestByTabId[id]
+                .flatMap { Self.sidebarDisplayText(for: $0) }
+                .map { text in
+                    SidebarDetailAggregation.notificationText(
+                        text,
+                        surfaceCount: indexes.unreadSurfacesByTabIdAndText[id]?[text]?.count ?? 0
+                    )
+                }
             if count == 0, latestText == nil { continue }
             result[id] = SidebarWorkspaceUnreadSummary(
                 unreadCount: count,
@@ -2070,6 +2083,14 @@ final class TerminalNotificationStore: ObservableObject {
         return shouldDeferAutomaticAuthorizationRequest(status: status, isAppActive: isAppActive)
     }
 
+    /// The single line the sidebar renders for a notification: body when it has
+    /// one, else the title. `nil` when neither carries text.
+    private static func sidebarDisplayText(for notification: TerminalNotification) -> String? {
+        let text = notification.body.isEmpty ? notification.title : notification.body
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private static func buildIndexes(for notifications: [TerminalNotification]) -> NotificationIndexes {
         var indexes = NotificationIndexes()
         for notification in notifications {
@@ -2079,6 +2100,10 @@ final class TerminalNotificationStore: ObservableObject {
             guard !notification.isRead else { continue }
             indexes.unreadCount += 1
             indexes.unreadCountByTabId[notification.tabId, default: 0] += 1
+            if let text = sidebarDisplayText(for: notification) {
+                indexes.unreadSurfacesByTabIdAndText[notification.tabId, default: [:]][text, default: []]
+                    .insert(notification.surfaceId ?? notification.panelId ?? notification.tabId)
+            }
             indexes.unreadByTabSurface.insert(
                 TabSurfaceKey(tabId: notification.tabId, surfaceId: notification.surfaceId)
             )

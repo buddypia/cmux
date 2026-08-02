@@ -1,3 +1,4 @@
+import Bonsplit
 import CMUXAgentLaunch
 import Foundation
 
@@ -170,6 +171,25 @@ extension TabManager {
             kind: .assistantFinal,
             reorderWithoutMessage: false
         )
+    }
+
+    /// Records the agent's last conversation output on one surface.
+    ///
+    /// Deliberately independent of iMessage mode: that setting governs the
+    /// workspace-level chat preview and the reorder-to-top behavior, while this
+    /// is the per-surface "what did the agent last say" text that the sidebar
+    /// status strip and the session snapshot both read. Hook payloads carry
+    /// surface ids, so accept either a panel id or a surface id, and fall back
+    /// to the focused surface when the hook carried neither.
+    func recordAgentSurfaceMessage(workspaceId: UUID, surfaceId: UUID?, message: String?) {
+        guard let workspace = tabs.first(where: { $0.id == workspaceId }) else { return }
+        let resolvedPanelId: UUID? = {
+            guard let surfaceId else { return workspace.focusedPanelId }
+            if workspace.panels[surfaceId] != nil { return surfaceId }
+            return workspace.panelIdFromSurfaceId(TabID(uuid: surfaceId)) ?? workspace.focusedPanelId
+        }()
+        guard let resolvedPanelId else { return }
+        workspace.recordAgentLastMessage(message, panelId: resolvedPanelId)
     }
 
     private func handleConversationMessage(

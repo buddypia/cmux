@@ -110,15 +110,33 @@ extension RestorableAgentSessionIndex {
             let cwd = normalized(observed.environment["CMUX_AGENT_LAUNCH_CWD"] ?? observed.environment["PWD"])
             let processRegistry = registryForWorkingDirectory(cwd)
             guard let registration = processRegistry.registrations.first(where: { $0.detect.matches(observed) }),
-                  registration.processDetectedSnapshotIsRestorable(for: observed),
-                  let sessionIDResolution = registration.sessionIdSource.sessionIDResolution(
-                      from: observed,
-                      registration: registration,
-                      fileManager: fileManager
-                  ) else {
+                  registration.processDetectedSnapshotIsRestorable(for: observed) else {
                 continue
             }
-            let sessionId = sessionIDResolution.sessionId
+            var resolvedSessionId: String?
+            var sessionSource: RestorableAgentSessionIndex.ProcessDetectedSessionIDSource = .explicit
+            if let sessionIDResolution = registration.sessionIdSource.sessionIDResolution(
+                from: observed,
+                registration: registration,
+                fileManager: fileManager
+            ) {
+                resolvedSessionId = sessionIDResolution.sessionId
+                sessionSource = sessionIDResolution.source
+            } else if registration.id == CmuxVaultAgentRegistration.builtInAntigravity.id || registration.id == "antigravity" {
+                if let inferredId = AntigravitySessionResolver(fileManager: fileManager).inferredAntigravitySessionId(cwd: cwd, env: observed.environment) {
+                    resolvedSessionId = inferredId
+                    sessionSource = .inferredLatestSessionFile
+                }
+            } else if registration.id == "codex" {
+                if let inferredId = CodexSessionResolver(fileManager: fileManager).inferredCodexSessionId(cwd: cwd, env: observed.environment) {
+                    resolvedSessionId = inferredId
+                    sessionSource = .inferredLatestSessionFile
+                }
+            }
+
+            guard let sessionId = resolvedSessionId else {
+                continue
+            }
 
             let useDefaultExecutable = registration.detect.usesAlternateMatchWithoutPrimaryMatch(observed)
             var executablePath = useDefaultExecutable
@@ -152,7 +170,7 @@ extension RestorableAgentSessionIndex {
                 updatedAt: capturedAt,
                 processIDs: scopedProcessIDsByPanelKey[key] ?? [],
                 agentProcessIDs: [process.pid],
-                sessionIDSource: sessionIDResolution.source
+                sessionIDSource: sessionSource
             )
         }
 

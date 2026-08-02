@@ -15,23 +15,25 @@ struct TranscriptToolCompletion: Sendable {
     /// Wall-clock duration in seconds, when one was parseable.
     let durationSeconds: Double?
 
+    /// How a gated request was answered, when the transcript states it
+    /// directly rather than through result text.
+    let permissionResolution: ChatPermissionRequest.Resolution?
+
     /// Creates a completion.
-    ///
-    /// - Parameters:
-    ///   - output: The extracted result text.
-    ///   - isError: Whether the result was flagged as an error.
-    ///   - exitCode: The parsed exit code, when available.
-    ///   - durationSeconds: The parsed duration, when available.
     init(
         output: String?,
         isError: Bool,
         exitCode: Int? = nil,
-        durationSeconds: Double? = nil
+        durationSeconds: Double? = nil,
+        timestamp: Date? = nil,
+        permissionResolution: ChatPermissionRequest.Resolution? = nil,
+        questionResolution: ChatQuestion.Resolution? = nil
     ) {
         self.output = output
         self.isError = isError
         self.exitCode = exitCode
         self.durationSeconds = durationSeconds
+        self.permissionResolution = permissionResolution
     }
 
     /// Produces the completed copy of a pending tool message.
@@ -80,6 +82,16 @@ struct TranscriptToolCompletion: Sendable {
                 questionID: question.questionID
             )
             return message.replacingKind(.question(answered))
+        case .permissionRequest(let request):
+            // An already-answered card is terminal; re-resolving it would let a
+            // late row flip a denial into an approval.
+            guard request.resolution == nil, let permissionResolution else { return nil }
+            let resolved = ChatPermissionRequest(
+                title: request.title,
+                subject: request.subject,
+                resolution: permissionResolution
+            )
+            return message.replacingKind(.permissionRequest(resolved))
         default:
             return nil
         }

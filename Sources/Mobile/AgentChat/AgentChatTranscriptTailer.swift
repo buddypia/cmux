@@ -87,6 +87,10 @@ actor AgentChatTranscriptTailer {
     private var watcher: FileWatcher?
     private var started = false
     private var reportedTitle = false
+    /// First user prompt reported by a transcript row that produces no message
+    /// (Codex `event_msg`/`user_message`). Used only when the cache has no user
+    /// prose to take the title from.
+    private var promptTitleCandidate: String?
 
     /// Creates a tailer.
     ///
@@ -175,14 +179,25 @@ actor AgentChatTranscriptTailer {
         )
     }
 
+    /// Latches the first message-less prompt a parse call reported.
+    /// First write wins, mirroring `title`'s "first prompt" rule.
+    private func notePromptTitleCandidate(_ candidate: String?) {
+        guard promptTitleCandidate == nil, let candidate else { return }
+        promptTitleCandidate = candidate
+    }
+
     /// First user prompt in the cache, for the session title.
+    ///
+    /// Falls back to a prompt the transcript stated without producing a
+    /// message, so a Codex session whose head is still only telemetry rows
+    /// still gets a title instead of showing as untitled.
     var title: String? {
         for message in cache {
             if message.role == .user, case .prose(let prose) = message.kind {
                 return String(prose.text.prefix(80))
             }
         }
-        return nil
+        return promptTitleCandidate
     }
 
     // MARK: - Reading
@@ -230,6 +245,7 @@ actor AgentChatTranscriptTailer {
         let outcome = parse(lines: lines, startingSeq: parseStartLine)
         cache = outcome.messages
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         trimCacheIfNeeded()
         return outcome
     }
@@ -265,6 +281,7 @@ actor AgentChatTranscriptTailer {
             // the file) carries a new first prompt; allow it to be rediscovered
             // and re-emitted as the title instead of keeping the stale one.
             reportedTitle = false
+            promptTitleCandidate = nil
             let outcome = loadInitialTail()
             let initialBatch = outcome.flatMap { initialSnapshotBatch(from: $0, didReset: true) }
             await onBatch(initialBatch ?? Batch(appended: [], updated: [], discoveredTitle: nil, didReset: true))
@@ -291,6 +308,7 @@ actor AgentChatTranscriptTailer {
         let outcome = parse(lines: lines, startingSeq: startingSeq)
         let hasPendingTranscriptWork = Self.hasPendingTranscriptWork(outcome.state)
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         let stateUpdates = outcome.stateUpdates
         let titleUpdate = outcome.titleUpdate
         var updated = outcome.updatedMessages
@@ -329,6 +347,7 @@ actor AgentChatTranscriptTailer {
         guard let outcome = parseSessionJSONFile() else { return nil }
         cache = outcome.messages
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         lineCount = (outcome.messages.map(\.seq).max() ?? -1) + 1
         wholeJSONMessagesByID = Self.messagesByID(outcome.messages)
         wholeJSONStateUpdates = outcome.stateUpdates
@@ -343,6 +362,7 @@ actor AgentChatTranscriptTailer {
         guard let outcome = parseGeneratedMessagesDirectory() else { return nil }
         cache = outcome.messages
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         lineCount = (outcome.messages.map(\.seq).max() ?? -1) + 1
         wholeJSONMessagesByID = Self.messagesByID(outcome.messages)
         wholeJSONStateUpdates = outcome.stateUpdates
@@ -363,6 +383,7 @@ actor AgentChatTranscriptTailer {
             wholeJSONStateUpdates = []
             headTruncated = false
             reportedTitle = false
+            promptTitleCandidate = nil
             let outcome = loadInitialSessionJSON()
             let initialBatch = outcome.flatMap { initialSnapshotBatch(from: $0, didReset: true) }
             await onBatch(initialBatch ?? Batch(appended: [], updated: [], discoveredTitle: nil, didReset: true))
@@ -375,6 +396,7 @@ actor AgentChatTranscriptTailer {
         lineCount = (outcome.messages.map(\.seq).max() ?? -1) + 1
         let hasPendingTranscriptWork = Self.hasPendingTranscriptWork(outcome.state)
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         let stateUpdates = Self.newStateUpdates(
             in: outcome.stateUpdates,
             previous: wholeJSONStateUpdates
@@ -429,6 +451,7 @@ actor AgentChatTranscriptTailer {
             wholeJSONStateUpdates = []
             headTruncated = false
             reportedTitle = false
+            promptTitleCandidate = nil
             let outcome = loadInitialGeneratedMessagesDirectory()
             let initialBatch = outcome.flatMap { initialSnapshotBatch(from: $0, didReset: true) }
             await onBatch(initialBatch ?? Batch(appended: [], updated: [], discoveredTitle: nil, didReset: true))
@@ -440,6 +463,7 @@ actor AgentChatTranscriptTailer {
         lineCount = (outcome.messages.map(\.seq).max() ?? -1) + 1
         let hasPendingTranscriptWork = Self.hasPendingTranscriptWork(outcome.state)
         parseState = outcome.state
+        notePromptTitleCandidate(outcome.promptTitleCandidate)
         let stateUpdates = Self.newStateUpdates(
             in: outcome.stateUpdates,
             previous: wholeJSONStateUpdates

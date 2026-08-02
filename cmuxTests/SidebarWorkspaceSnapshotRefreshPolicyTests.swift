@@ -130,7 +130,9 @@ import Testing
         listeningPorts: [Int] = [],
         finderDirectoryPath: String? = nil,
         mediaActivity: BrowserMediaActivity = BrowserMediaActivity(),
-        activeCodingAgentCount: Int = 0
+        activeCodingAgentCount: Int = 0,
+        agentStatusGroups: [AgentStatusBadgeGroup] = [],
+        latestAgentOutput: String? = nil
     ) -> SidebarWorkspaceSnapshotBuilder.Snapshot {
         SidebarWorkspaceSnapshotBuilder.Snapshot(
             presentationKey: presentationKey ?? Self.presentationKey(),
@@ -149,6 +151,8 @@ import Testing
             latestLog: nil,
             progress: nil,
             activeCodingAgentCount: activeCodingAgentCount,
+            agentStatusGroups: agentStatusGroups,
+            latestAgentOutput: latestAgentOutput,
             compactGitBranchSummaryText: nil,
             compactDirectoryCandidates: [],
             compactBranchDirectoryCandidates: [],

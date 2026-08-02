@@ -14251,6 +14251,57 @@
         }
       }
     },
+    "agentStatus.label.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了"
+          }
+        }
+      }
+    },
+    "agentStatus.label.idle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idle"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待機中"
+          }
+        }
+      }
+    },
+    "agentStatus.label.working": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行中"
+          }
+        }
+      }
+    },
     "alert.cancel": {
       "extractionState": "manual",
       "localizations": {
@@ -42301,13 +42352,91 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Path does not exist: %@"
+            "value": "automation.socketPassword auth token credential secret password access key"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key autenticación iniciar sesión cerrar correo usuario perfil equipo cuenta automatización api cli control socket agente hooks puertos entorno teclado atajo atajos tecla rápida comandos teclas grabador contraseña secreto credencial acceso permitir desactivar activar permiso inseguro del"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key authentification connexion déconnexion e-mail utilisateur profil équipe compte automatisation api cli contrôle socket agent hooks ports environnement clavier raccourci raccourcis touche globale commandes touches enregistreur mot de passe jeton identifiant accès autoriser désactiver activer autorisation non sécurisé du"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key autenticazione accesso disconnessione email utente profilo team account automazione api cli controllo socket agente hook porte ambiente tastiera scorciatoia scorciatoie tasto rapido comandi tasti registratore segreto credenziale consenti disabilita abilita autorizzazione non sicuro"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "パスが存在しません: %@"
+            "value": "automation.socketPassword auth token credential secret password access key ソケット パスワード 認証 トークン 資格情報 シークレット アクセスキー"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key 인증 로그인 로그아웃 이메일 사용자 프로필 팀 계정 자동화 api cli 제어 소켓 에이전트 훅 포트 환경 키보드 단축키 핫키 명령 키 기록기 비밀번호 비밀 토큰 자격 증명 접근 허용 비활성화 활성화 권한 안전하지 않음"
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key autentisering innlogging utlogging e-post bruker profil team konto automatisering api cli kontroll socket agent hooks porter miljø tastatur snarvei snarveier hurtigtast kommandoer taster opptaker passord hemmelighet legitimasjon tilgang tillat deaktiver aktiver tillatelse usikker Socket-passord"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key uwierzytelnianie logowanie wylogowanie email użytkownik profil zespół konto automatyzacja api cli sterowanie gniazdo agent haki porty środowisko klawiatura skrót skróty klawisz polecenia klawisze rejestrator hasło sekret poświadczenie dostęp zezwól wyłącz włącz uprawnienie niezabezpieczone gniazda"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key autenticação login sair email usuário perfil equipe conta automação api cli controle socket agente hooks portas ambiente teclado atalho atalhos tecla rápida comandos teclas gravador senha segredo credencial acesso permitir desativar ativar permissão inseguro do"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key аутентификация вход выход email пользователь профиль команда аккаунт автоматизация api cli управление сокет агент хуки порты окружение клавиатура сочетание клавиш горячая клавиша команды клавиши запись пароль секрет токен учетные данные доступ разрешить отключить включить разрешение небезопасно сокета"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key ยืนยันตัวตน เข้าสู่ระบบ ออกจากระบบ อีเมล ผู้ใช้ โปรไฟล์ ทีม บัญชี อัตโนมัติ api cli ควบคุม ซ็อกเก็ต เอเจนต์ ฮุก พอร์ต สภาพแวดล้อม แป้นพิมพ์ ทางลัด ปุ่มลัด คำสั่ง คีย์ ตัวบันทึก รหัสผ่าน ความลับ โทเค็น ข้อมูลรับรอง เข้าถึง อนุญาต ปิด เปิด สิทธิ์ ไม่ปลอดภัย รหัสผ่านซ็อกเก็ต ระบบอัตโนมัติ"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key kimlik doğrulama giriş çıkış e-posta kullanıcı profil takım hesap otomasyon api cli kontrol soket ajan kancalar portlar ortam klavye kısayol kısayollar tuşu komutlar tuşlar kaydedici parola gizli bilgisi erişim izin ver devre dışı etkinleştir güvensiz Parolası"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key автентифікація вхід вихід email користувач профіль команда обліковий запис автоматизація api cli керування сокет агент хуки порти середовище клавіатура скорочення гарячі клавіші команди записувач пароль секрет токен облікові дані доступ дозволити вимкнути увімкнути дозвіл небезпечно сокета"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key 认证 登录 退出登录 邮件 用户 个人资料 团队 账户 自动化 api cli 控制 套接字 代理 钩子 端口 环境 键盘 快捷键 热键 命令 按键 录制器 密码 密钥 令牌 凭据 访问 允许 禁用 启用 权限 不安全 套接字密码"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.socketPassword auth token credential secret password access key 驗證 登入 登出 郵件 使用者 個人資料 團隊 帳戶 自動化 api cli 控制 socket 代理程式 hook 連接埠 環境 鍵盤 快捷鍵 熱鍵 命令 按鍵 錄製器 密碼 密鑰 權杖 憑證 存取 允許 停用 啟用 權限 不安全"
           }
         }
       }
@@ -174773,101 +174902,6 @@
         }
       }
     },
-    "cli.pathOpen.error.pathDoesNotExist": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key autenticación iniciar sesión cerrar correo usuario perfil equipo cuenta automatización api cli control socket agente hooks puertos entorno teclado atajo atajos tecla rápida comandos teclas grabador contraseña secreto credencial acceso permitir desactivar activar permiso inseguro del"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key authentification connexion déconnexion e-mail utilisateur profil équipe compte automatisation api cli contrôle socket agent hooks ports environnement clavier raccourci raccourcis touche globale commandes touches enregistreur mot de passe jeton identifiant accès autoriser désactiver activer autorisation non sécurisé du"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key autenticazione accesso disconnessione email utente profilo team account automazione api cli controllo socket agente hook porte ambiente tastiera scorciatoia scorciatoie tasto rapido comandi tasti registratore segreto credenziale consenti disabilita abilita autorizzazione non sicuro"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key ソケット パスワード 認証 トークン 資格情報 シークレット アクセスキー"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key 인증 로그인 로그아웃 이메일 사용자 프로필 팀 계정 자동화 api cli 제어 소켓 에이전트 훅 포트 환경 키보드 단축키 핫키 명령 키 기록기 비밀번호 비밀 토큰 자격 증명 접근 허용 비활성화 활성화 권한 안전하지 않음"
-          }
-        },
-        "nb": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key autentisering innlogging utlogging e-post bruker profil team konto automatisering api cli kontroll socket agent hooks porter miljø tastatur snarvei snarveier hurtigtast kommandoer taster opptaker passord hemmelighet legitimasjon tilgang tillat deaktiver aktiver tillatelse usikker Socket-passord"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key uwierzytelnianie logowanie wylogowanie email użytkownik profil zespół konto automatyzacja api cli sterowanie gniazdo agent haki porty środowisko klawiatura skrót skróty klawisz polecenia klawisze rejestrator hasło sekret poświadczenie dostęp zezwól wyłącz włącz uprawnienie niezabezpieczone gniazda"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key autenticação login sair email usuário perfil equipe conta automação api cli controle socket agente hooks portas ambiente teclado atalho atalhos tecla rápida comandos teclas gravador senha segredo credencial acesso permitir desativar ativar permissão inseguro do"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key аутентификация вход выход email пользователь профиль команда аккаунт автоматизация api cli управление сокет агент хуки порты окружение клавиатура сочетание клавиш горячая клавиша команды клавиши запись пароль секрет токен учетные данные доступ разрешить отключить включить разрешение небезопасно сокета"
-          }
-        },
-        "th": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key ยืนยันตัวตน เข้าสู่ระบบ ออกจากระบบ อีเมล ผู้ใช้ โปรไฟล์ ทีม บัญชี อัตโนมัติ api cli ควบคุม ซ็อกเก็ต เอเจนต์ ฮุก พอร์ต สภาพแวดล้อม แป้นพิมพ์ ทางลัด ปุ่มลัด คำสั่ง คีย์ ตัวบันทึก รหัสผ่าน ความลับ โทเค็น ข้อมูลรับรอง เข้าถึง อนุญาต ปิด เปิด สิทธิ์ ไม่ปลอดภัย รหัสผ่านซ็อกเก็ต ระบบอัตโนมัติ"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key kimlik doğrulama giriş çıkış e-posta kullanıcı profil takım hesap otomasyon api cli kontrol soket ajan kancalar portlar ortam klavye kısayol kısayollar tuşu komutlar tuşlar kaydedici parola gizli bilgisi erişim izin ver devre dışı etkinleştir güvensiz Parolası"
-          }
-        },
-        "uk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key автентифікація вхід вихід email користувач профіль команда обліковий запис автоматизація api cli керування сокет агент хуки порти середовище клавіатура скорочення гарячі клавіші команди записувач пароль секрет токен облікові дані доступ дозволити вимкнути увімкнути дозвіл небезпечно сокета"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key 认证 登录 退出登录 邮件 用户 个人资料 团队 账户 自动化 api cli 控制 套接字 代理 钩子 端口 环境 键盘 快捷键 热键 命令 按键 录制器 密码 密钥 令牌 凭据 访问 允许 禁用 启用 权限 不安全 套接字密码"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "automation.socketPassword auth token credential secret password access key 驗證 登入 登出 郵件 使用者 個人資料 團隊 帳戶 自動化 api cli 控制 socket 代理程式 hook 連接埠 環境 鍵盤 快捷鍵 熱鍵 命令 按鍵 錄製器 密碼 密鑰 權杖 憑證 存取 允許 停用 啟用 權限 不安全"
-          }
-        }
-      }
-    },
     "settings.search.alias.setting.automation.subagent-notifications": {
       "extractionState": "manual",
       "localizations": {
@@ -200713,6 +200747,108 @@
         }
       }
     },
+    "sidebar.agentStatus.badge.accessibilityItem": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld %2$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld 件 %2$@"
+          }
+        }
+      }
+    },
+    "sidebar.agentStatus.badge.accessibilityLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agents: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エージェント: %@"
+          }
+        }
+      }
+    },
+    "sidebar.agentStatus.badge.agentSeparator": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "; "
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "／"
+          }
+        }
+      }
+    },
+    "sidebar.agentStatus.badge.agentSummary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — %2$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — %2$@"
+          }
+        }
+      }
+    },
+    "sidebar.agentStatus.badge.agentSummary.restored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — %2$@ (last status before restore)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ — %2$@（復元前の最後のステータス）"
+          }
+        }
+      }
+    },
+    "sidebar.agentStatus.badge.itemSeparator": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", "
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "、"
+          }
+        }
+      }
+    },
     "sidebar.browserStack.closeGroup": {
       "extractionState": "manual",
       "localizations": {
@@ -205288,6 +205424,35 @@
         }
       }
     },
+    "sidebar.notification.repeatFormat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ ×%2$lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ ×%2$lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ ×%2$lld"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ ×%2$lld"
+          }
+        }
+      }
+    },
     "sidebar.pathMenu.macintoshHD": {
       "extractionState": "manual",
       "localizations": {
@@ -205490,6 +205655,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "Відкрити localhost:%lld"
+          }
+        }
+      }
+    },
+    "sidebar.port.overflowLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%lld"
+          }
+        }
+      }
+    },
+    "sidebar.port.overflowTooltip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld more listening ports: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他 %lld 個のリッスン中ポート: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld개의 추가 수신 포트: %@"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ще %lld прослуховуваних портів: %@"
           }
         }
       }

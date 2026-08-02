@@ -2124,6 +2124,74 @@ class TabManager: ObservableObject {
         }
     }
 
+    /// Detach an entire workspace group and all its member workspaces from this window.
+    @discardableResult
+    func detachWorkspaceGroup(groupId: UUID) -> (group: WorkspaceGroup, workspaces: [Workspace])? {
+        guard let groupIndex = workspaceGroups.firstIndex(where: { $0.id == groupId }) else {
+            return nil
+        }
+        let group = workspaceGroups[groupIndex]
+        let memberWorkspaces = tabs.filter { $0.groupId == groupId }
+        guard !memberWorkspaces.isEmpty else { return nil }
+
+        panelTitleUpdateCoalescer.flushNow()
+
+        for ws in memberWorkspaces {
+            sidebarGitMetadataService.clearWorkspaceGitProbes(workspaceId: ws.id)
+            sidebarMultiSelection.removeFromSelection(ws.id)
+            invalidateFocusHistoryTarget(workspaceId: ws.id, panelId: nil)
+
+            if let idx = tabs.firstIndex(where: { $0.id == ws.id }) {
+                tabs.remove(at: idx)
+            }
+            unwireClosedBrowserTracking(for: ws)
+            browserModel.removeClosedBrowserPanels(forWorkspaceId: ws.id)
+            ws.owningTabManager = nil
+            lastFocusedPanelByTab.removeValue(forKey: ws.id)
+        }
+
+        workspaces.workspaceGroups.removeAll { $0.id == groupId }
+
+        if tabs.isEmpty {
+            _ = addWorkspace()
+        } else if let selectedId = selectedTabId, memberWorkspaces.contains(where: { $0.id == selectedId }) {
+            selectedTabId = tabs.first?.id
+        }
+
+        return (group, memberWorkspaces)
+    }
+
+    /// Attach an existing workspace group and its member workspaces to this window.
+    func attachWorkspaceGroup(group: WorkspaceGroup, workspaces memberWorkspaces: [Workspace], at index: Int? = nil, select: Bool = true) {
+        guard !memberWorkspaces.isEmpty else { return }
+
+        if !workspaceGroups.contains(where: { $0.id == group.id }) {
+            workspaces.workspaceGroups.append(group)
+        }
+
+        let insertBase: Int = {
+            guard let index else { return tabs.count }
+            return max(0, min(index, tabs.count))
+        }()
+
+        for (offset, workspace) in memberWorkspaces.enumerated() {
+            workspace.owningTabManager = self
+            workspace.groupId = group.id
+            wireClosedBrowserTracking(for: workspace)
+            let targetIdx = min(insertBase + offset, tabs.count)
+            tabs.insert(workspace, at: targetIdx)
+        }
+
+        workspaces.normalizeWorkspaceGroupContiguity()
+
+        if select {
+            let targetToSelect = memberWorkspaces.first(where: { $0.id == group.anchorWorkspaceId }) ?? memberWorkspaces.first
+            if let targetToSelect {
+                selectTab(targetToSelect)
+            }
+        }
+    }
+
     // Keep closeTab as convenience alias
     func closeTab(_ tab: Workspace) { closeWorkspace(tab) }
     func closeCurrentTabWithConfirmation() { closeCurrentWorkspaceWithConfirmation() }

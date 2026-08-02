@@ -7,6 +7,9 @@ struct TranscriptBatchAssembler {
     private var messages: [ChatMessage] = []
     private var updatedMessages: [ChatMessage] = []
     private var artifactReferences: [ChatArtifactTranscriptReference] = []
+    private var stateUpdates: [ChatTranscriptStateUpdate] = []
+    private var titleUpdate: String?
+    private var promptTitleCandidate: String?
     private var pending: [String: [ChatMessage]]
     private var batchIndexByMessageID: [String: Int] = [:]
     private let budget: TranscriptTextBudget
@@ -27,6 +30,28 @@ struct TranscriptBatchAssembler {
     init(state: ChatTranscriptParseState, budget: TranscriptTextBudget) {
         self.pending = state.pendingToolUses
         self.budget = budget
+    }
+
+    /// Appends a transcript state update emitted by a lifecycle event.
+    mutating func appendStateUpdate(_ update: ChatTranscriptStateUpdate) {
+        stateUpdates.append(update)
+    }
+
+    /// Records a rename the agent published for the conversation.
+    /// Last write wins: a later rename supersedes an earlier one in the batch.
+    mutating func noteTitleUpdate(_ title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        titleUpdate = trimmed
+    }
+
+    /// Records the session's first user prompt from a row that produces no
+    /// message. First write wins: the title is the *first* prompt.
+    mutating func notePromptTitleCandidate(_ prompt: String) {
+        guard promptTitleCandidate == nil else { return }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        promptTitleCandidate = String(trimmed.prefix(80))
     }
 
     /// Appends a newly parsed message, optionally registering it as a tool
@@ -63,26 +88,38 @@ struct TranscriptBatchAssembler {
         })
     }
 
+    /// Resolves all pending tool uses with a given completion.
+    mutating func resolveAll(completion: TranscriptToolCompletion) {
+        let keys = Array(pending.keys)
+        for key in keys {
+            resolve(key: key, completion: completion)
+        }
+    }
+
     /// Pairs a tool result with its pending invocation, if registered.
     ///
     /// - Parameters:
     ///   - key: The tool call identifier from the result line.
     ///   - completion: The observed result.
-    mutating func resolve(key: String, completion: TranscriptToolCompletion) {
-        guard let pendingMessages = pending.removeValue(forKey: key) else { return }
+    @discardableResult
+    mutating func resolve(key: String, completion: TranscriptToolCompletion) -> Bool {
+        guard let pendingMessages = pending.removeValue(forKey: key) else { return false }
         // Apply to every message registered under this call id. For
         // questions, `completion.applied` resolves each by its own prompt,
         // so multi-question cards each get their correct answer.
+        var matched = false
         for pendingMessage in pendingMessages {
             guard let completed = completion.applied(to: pendingMessage, budget: budget) else {
                 continue
             }
+            matched = true
             if let index = batchIndexByMessageID[completed.id] {
                 messages[index] = completed
             } else {
                 updatedMessages.append(completed)
             }
         }
+        return matched
     }
 
     /// Finalizes the batch into a parse result.
@@ -94,6 +131,9 @@ struct TranscriptBatchAssembler {
             messages: messages,
             updatedMessages: updatedMessages,
             artifactReferences: artifactReferences,
+            stateUpdates: stateUpdates,
+            titleUpdate: titleUpdate,
+            promptTitleCandidate: promptTitleCandidate,
             state: ChatTranscriptParseState(
                 pendingToolUses: Self.bounded(pending),
                 lastTimestamp: lastTimestamp

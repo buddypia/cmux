@@ -26,6 +26,8 @@ xcodebuild \
   -configuration Debug \
   -destination "platform=macOS" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  ENABLE_APP_INTENTS_METADATA_EXTRACTION=NO \
+  SWIFT_EMIT_APP_INTENTS_METADATA=NO \
   build >/dev/null
 
 if [ ! -d "$APP" ]; then

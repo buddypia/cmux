@@ -148,6 +148,8 @@ XCODEBUILD_ARGS=(
   -scheme cmux
   -configuration Release
   -destination 'platform=macOS'
+  ENABLE_APP_INTENTS_METADATA_EXTRACTION=NO
+  SWIFT_EMIT_APP_INTENTS_METADATA=NO
 )
 if [[ -n "$DERIVED_DATA" ]]; then
   XCODEBUILD_ARGS+=(-derivedDataPath "$DERIVED_DATA")

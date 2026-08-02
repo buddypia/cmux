@@ -175,13 +175,18 @@ extension SurfaceResumeCommandCanonicalizer {
             return "claude"
         case "codex":
             return "codex"
+        case "antigravity", "agy":
+            return "agy"
         default:
             return nil
         }
     }
 
     private static func portableAgentExecutableName(forExecutableBasename basename: String) -> String? {
-        portableAgentExecutableName(for: basename)
+        if basename == "agy" || basename == "antigravity" {
+            return "agy"
+        }
+        return portableAgentExecutableName(for: basename)
     }
 
     private static func isPATHManagedAgentExecutablePath(_ path: String, executableName: String) -> Bool {

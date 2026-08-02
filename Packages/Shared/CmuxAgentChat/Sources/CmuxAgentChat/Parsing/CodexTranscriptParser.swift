@@ -145,6 +145,8 @@ public struct CodexTranscriptParser: Sendable {
         into assembler: inout TranscriptBatchAssembler
     ) {
         switch payload?["type"]?.string {
+        case "patch_apply_begin":
+            resolveApproval(payload, resolution: .approved, into: &assembler)
         case "patch_apply_end":
             appendEventTextArtifacts(payload, seq: seq, into: &assembler)
             appendPatchApplyEnd(payload, seq: seq, timestamp: timestamp, into: &assembler)
@@ -152,13 +154,105 @@ public struct CodexTranscriptParser: Sendable {
             if let text = payload?["message"]?.string {
                 assembler.appendArtifactReferences(paths: artifactText.paths(in: text), seq: seq)
             }
+        case "exec_approval_request", "apply_patch_approval_request":
+            appendApprovalRequest(payload, seq: seq, timestamp: timestamp, into: &assembler)
         case "exec_command_begin":
+            // A gated command only begins once its approval was granted, so
+            // this is Codex's implicit "approved" record: without it the
+            // pending card — and the session's needs-input state — never clears.
+            resolveApproval(payload, resolution: .approved, into: &assembler)
             appendEventTextArtifacts(payload, seq: seq, into: &assembler)
         case "exec_command_end", "exec_command_output_delta":
             appendEventTextArtifacts(payload, seq: seq, into: &assembler)
+        // Turn lifecycle. Codex states its own working/idle boundaries here,
+        // which is the only live-status signal available when its cmux hooks
+        // are not installed; without it a Codex surface has to be inferred
+        // from tool rows alone and reads as idle between tools.
+        case "task_started":
+            assembler.appendStateUpdate(
+                ChatTranscriptStateUpdate(kind: .working, seq: seq, timestamp: timestamp)
+            )
+        case "task_complete", "turn_complete", "turn_aborted":
+            assembler.appendStateUpdate(
+                ChatTranscriptStateUpdate(kind: .idle, seq: seq, timestamp: timestamp)
+            )
+        case "user_message":
+            // Title only — the rendered prompt arrives separately as a
+            // `response_item` message; see `promptTitleCandidate`.
+            if let text = payload?["text"]?.string ?? payload?["message"]?.string {
+                assembler.notePromptTitleCandidate(text)
+            }
+        case "thread_name_updated":
+            if let name = payload?["thread_name"]?.string ?? payload?["name"]?.string {
+                assembler.noteTitleUpdate(name)
+            }
         default:
             return
         }
+    }
+
+    /// Codex is blocked on the user for a command or patch it wants to run.
+    ///
+    /// Emitted as a pending permission card so the session reads as
+    /// "needs input" — the transcript is the only place this shows up when
+    /// Codex's cmux hooks are not installed.
+    private func appendApprovalRequest(
+        _ payload: TranscriptJSONValue?,
+        seq: Int,
+        timestamp: Date,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let payload else { return }
+        let callID = Self.approvalCallID(in: payload)
+        let subject = payload["command"]?.string
+            ?? payload["cmd"]?.string
+            ?? payload["patch"]?.string
+            ?? payload["reason"]?.string
+            ?? ""
+        assembler.append(
+            ChatMessage(
+                id: callID.map { "approval-\($0)" } ?? "line-\(seq)",
+                seq: seq,
+                role: .agent,
+                timestamp: timestamp,
+                kind: .permissionRequest(
+                    ChatPermissionRequest(
+                        // Literal to match the sibling Antigravity parser: this
+                        // package ships no string catalog, so `String(localized:)`
+                        // here would resolve to the same English text while
+                        // looking translated. Localizing the whole package's
+                        // permission-card titles is a separate change.
+                        title: "Codex wants to run:",
+                        subject: budget.body(subject)
+                    )
+                )
+            ),
+            pendingKey: callID
+        )
+    }
+
+    /// Settles the pending approval card for `payload`'s call id.
+    private func resolveApproval(
+        _ payload: TranscriptJSONValue?,
+        resolution: ChatPermissionRequest.Resolution,
+        into assembler: inout TranscriptBatchAssembler
+    ) {
+        guard let payload, let callID = Self.approvalCallID(in: payload) else { return }
+        _ = assembler.resolve(
+            key: callID,
+            completion: TranscriptToolCompletion(
+                output: nil,
+                isError: false,
+                permissionResolution: resolution
+            )
+        )
+    }
+
+    private static func approvalCallID(in payload: TranscriptJSONValue) -> String? {
+        for key in ["call_id", "callId", "id", "turn_id"] {
+            if let value = payload[key]?.string, !value.isEmpty { return value }
+        }
+        return nil
     }
 
     private func appendMessage(

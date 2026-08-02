@@ -117,7 +117,7 @@ actor AgentChatArtifactIndex {
         switch agentKind {
         case .codex:
             parseResult = CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
-        case .claude, .other:
+        case .claude, .antigravity, .other:
             parseResult = ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0)
         }
         let artifacts = ChatArtifactIndexedReference.derive(

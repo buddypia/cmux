@@ -13126,8 +13126,7 @@ struct VerticalTabsSidebar: View, Equatable {
         }
         guard let foreignId = dragState.currentWorkspaceDragId,
               !tabManager.tabs.contains(where: { $0.id == foreignId }),
-              let sourceManager = AppDelegate.shared?.tabManagerFor(tabId: foreignId),
-              !sourceManager.workspaceGroups.contains(where: { $0.anchorWorkspaceId == foreignId }) else {
+              let sourceManager = AppDelegate.shared?.tabManagerFor(tabId: foreignId) else {
             return false
         }
         dragState.foreignDraggedIsPinned = sourceManager.tabs.first { $0.id == foreignId }?.isPinned ?? false
@@ -13215,13 +13214,19 @@ struct VerticalTabsSidebar: View, Equatable {
                 existingAnchorIndex: lastSidebarSelectionIndex,
                 liveWorkspaceIds: tabManager.tabs.map(\.id)
             )
-            let didReorder = tabManager.reorderSidebarWorkspace(
-                tabId: plan.draggedWorkspaceId,
-                toIndex: targetIndex,
-                isDragOperation: true,
-                usesTopLevelRows: usesTopLevelRows,
-                explicitGroupId: explicitGroupId
-            )
+            let didReorder: Bool
+            if let group = tabManager.workspaceGroups.first(where: { $0.anchorWorkspaceId == plan.draggedWorkspaceId }) {
+                tabManager.moveWorkspaceGroup(groupId: group.id, toIndex: targetIndex)
+                didReorder = true
+            } else {
+                didReorder = tabManager.reorderSidebarWorkspace(
+                    tabId: plan.draggedWorkspaceId,
+                    toIndex: targetIndex,
+                    isDragOperation: true,
+                    usesTopLevelRows: usesTopLevelRows,
+                    explicitGroupId: explicitGroupId
+                )
+            }
             syncSidebarSelectionAfterWorkspaceReorder(
                 preserving: selectionBeforeReorder,
                 preferredAnchorWorkspaceId: anchorWorkspaceIdBeforeReorder
@@ -13238,9 +13243,12 @@ struct VerticalTabsSidebar: View, Equatable {
     ) -> Bool {
         guard let app = AppDelegate.shared,
               let destinationWindowId = app.windowId(for: tabManager),
-              let sourceManager = app.tabManagerFor(tabId: plan.draggedWorkspaceId),
-              !sourceManager.workspaceGroups.contains(where: { $0.anchorWorkspaceId == plan.draggedWorkspaceId }) else {
+              let sourceManager = app.tabManagerFor(tabId: plan.draggedWorkspaceId) else {
             return false
+        }
+
+        if let group = sourceManager.workspaceGroups.first(where: { $0.anchorWorkspaceId == plan.draggedWorkspaceId }) {
+            return app.moveWorkspaceGroupToWindow(groupId: group.id, windowId: destinationWindowId, focus: true)
         }
 
         let sourceSelection = sourceManager.sidebarSelectedWorkspaceIds
@@ -14898,7 +14906,13 @@ struct TabItemView: View, Equatable {
         let conversationMessageSubtitle = !settings.hidesAllDetails && settings.iMessageModeEnabled
             ? workspaceSnapshot.latestConversationMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             : nil
-        let effectiveSubtitle = latestNotificationSubtitle ?? conversationMessageSubtitle
+        // Parity with the AppKit row: the agent's own last output stands in
+        // when there is no notification and no iMessage-mode preview.
+        let agentOutputSubtitle = settings.hidesAllDetails
+            ? nil
+            : workspaceSnapshot.latestAgentOutput?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let effectiveSubtitle = latestNotificationSubtitle ?? conversationMessageSubtitle ?? agentOutputSubtitle
+        let agentStatusGroups = workspaceSnapshot.agentStatusGroups
         let subtitleLineLimit = latestNotificationSubtitle == nil ? 2 : settings.notificationMessageLineLimit
         // Bound notification payloads before shaping so pathological text stays cheap in lazy, Equatable rows.
         let displayedSubtitle = effectiveSubtitle?.sidebarBoundedDisplayString(maxDisplayedLines: subtitleLineLimit, maxDisplayedCharacters: 4096)
@@ -15030,6 +15044,15 @@ struct TabItemView: View, Equatable {
                     fontScale: fontScale
                 )
             }
+
+            SidebarWorkspaceAgentStatusBadges(
+                groups: agentStatusGroups,
+                fontSize: scaledFontSize(9),
+                textColor: activeSecondaryColor(0.92),
+                fillColor: Color(nsColor: usesInvertedActiveForeground
+                    ? selectedWorkspaceForegroundNSColor(opacity: 0.16)
+                    : NSColor.secondaryLabelColor.withAlphaComponent(0.12))
+            )
 
             if let subtitle = displayedSubtitle {
                 Text(subtitle)
@@ -15252,8 +15275,11 @@ struct TabItemView: View, Equatable {
 
             // Ports row
             if detailVisibility.showsPorts, !workspaceSnapshot.listeningPorts.isEmpty {
+                // Same cap as the AppKit row: chips for the first few ports,
+                // the rest behind a `+N` menu.
+                let portDisplay = SidebarDetailAggregation.portDisplay(ports: workspaceSnapshot.listeningPorts)
                 HStack(spacing: 4) {
-                    ForEach(workspaceSnapshot.listeningPorts, id: \.self) { port in
+                    ForEach(portDisplay.visible, id: \.self) { port in
                         let portLabel = SidebarPortDisplayText.label(for: port)
                         let portTooltip = SidebarPortDisplayText.openTooltip(for: port)
                         Button(action: {
@@ -15264,6 +15290,19 @@ struct TabItemView: View, Equatable {
                         }
                         .buttonStyle(.plain)
                         .safeHelp(portTooltip)
+                    }
+                    if portDisplay.hasOverflow {
+                        Menu(SidebarDetailAggregation.portOverflowLabel(count: portDisplay.overflowCount)) {
+                            ForEach(portDisplay.overflow, id: \.self) { port in
+                                Button(SidebarPortDisplayText.openTooltip(for: port)) {
+                                    openPortLink(port)
+                                }
+                            }
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .safeHelp(SidebarDetailAggregation.portOverflowTooltip(ports: portDisplay.overflow))
                     }
                     Spacer(minLength: 0)
                 }

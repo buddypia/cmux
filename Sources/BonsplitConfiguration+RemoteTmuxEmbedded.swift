@@ -8,12 +8,10 @@ extension BonsplitConfiguration {
         configuration.allowCloseLastPane = false
         configuration.allowTabReordering = false
         configuration.allowCrossPaneTabMove = false
-        configuration.allowsTabContextMenu = false
         configuration.autoCloseEmptyPanes = false
         configuration.contentViewLifecycle = .keepAllAlive
         configuration.newTabPosition = .end
         configuration.tabBarVisibility = .always
-        configuration.dividerPositionRange = 0...1
 
         configuration.appearance.minimumPaneWidth = 1
         configuration.appearance.minimumPaneHeight = 1

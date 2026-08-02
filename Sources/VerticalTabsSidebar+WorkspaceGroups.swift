@@ -187,6 +187,12 @@ extension VerticalTabsSidebar {
             },
             onOpenDocs: {
                 SidebarWorkspaceGroupConfigOpener.openWorkspaceGroupsDocs()
+            },
+            onMoveGroupToWindow: { [groupId = group.id] windowId in
+                _ = AppDelegate.shared?.moveWorkspaceGroupToWindow(groupId: groupId, windowId: windowId)
+            },
+            onMoveGroupToNewWindow: { [groupId = group.id] in
+                _ = AppDelegate.shared?.moveWorkspaceGroupToNewWindow(groupId: groupId)
             }
         )
         return SidebarWorkspaceTableRowConfiguration(
