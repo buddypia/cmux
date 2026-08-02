@@ -99,7 +99,10 @@ struct SidebarWorkspaceSnapshotFactory {
             copyableSidebarSSHError: copyableSidebarSSHError,
             latestConversationMessage: workspace.latestConversationMessage,
             metadataEntries: detailVisibility.showsMetadata
-                ? workspace.sidebarStatusEntriesInDisplayOrder()
+                ? SidebarAgentIdleStatusEntry.hidingRedundantPlaceholders(
+                    in: workspace.sidebarStatusEntriesInDisplayOrder(),
+                    badgedAgentKeys: Set(agentStatusGroups.map(\.agentKey))
+                )
                 : [],
             metadataBlocks: detailVisibility.showsMetadata
                 ? workspace.sidebarMetadataBlocksInDisplayOrder()
