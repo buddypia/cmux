@@ -58,6 +58,7 @@ web/.pagefind-site/
 web/public/pagefind/
 
 # Local scratch (screenshots, etc.)
+.tmp
 tmp/
 tmp-*/
 .iter-logs/
