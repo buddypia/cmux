@@ -632,6 +632,11 @@ final class AgentChatTranscriptService {
     /// writer under its own key namespace (`agentchat.<kind>`) so the two never
     /// clobber each other — `Workspace` already resolves a panel's effective
     /// state by taking the most actionable entry across all keys.
+    ///
+    /// What gets published is ``AgentChatWorkspaceLifecycleMirror``'s call, not
+    /// a switch over `state` alone: a record the process table minted carries
+    /// `.idle` as its "no news yet" value, and publishing that painted `💤 Idle`
+    /// across the sidebar for a hook-less agent that was working.
     private func mirrorStateToWorkspace(
         _ record: AgentChatSessionRecord,
         previous: AgentChatSessionRecord?
@@ -645,16 +650,15 @@ final class AgentChatTranscriptService {
             stale.workspace.clearAgentLifecycle(key: key, panelId: stale.panelId)
         }
         guard let target = Self.workspaceAndPanel(record) else { return }
-        switch record.state {
-        case .ended:
+        guard let lifecycle = record.workspaceLifecycle else {
+            // Not "idle" — nothing to say. Clearing rather than leaving the
+            // previous entry matters when a record loses its evidence (a
+            // cmux-initiated resume reseeds it), so a reading from the agent
+            // that just went away cannot outlive it.
             target.workspace.clearAgentLifecycle(key: key, panelId: target.panelId)
-        case .working:
-            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .running)
-        case .needsInput:
-            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .needsInput)
-        case .idle:
-            target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: .idle)
+            return
         }
+        target.workspace.setAgentLifecycle(key: key, panelId: target.panelId, lifecycle: lifecycle)
     }
 
     /// Resolves a record's `(workspace, panel)` pair, or `nil` when the session
@@ -744,7 +748,13 @@ final class AgentChatTranscriptService {
                 resolver.boundedTranscriptPath(for: record)
             }
         }
-        if stateChanged || previous?.surfaceID != record.surfaceID {
+        // Provenance is part of the trigger, not just the payload: a SessionStart
+        // hook reports the `.idle` a process-observed record already held, so the
+        // value does not change — only who proved it. Without this the first
+        // hook of a session cmux had already spotted would never be published.
+        if stateChanged
+            || previous?.stateProvenance != record.stateProvenance
+            || previous?.surfaceID != record.surfaceID {
             mirrorStateToWorkspace(record, previous: previous)
         }
         guard hasEventSubscribers() else { return }

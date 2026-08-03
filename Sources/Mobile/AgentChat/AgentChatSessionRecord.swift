@@ -1,6 +1,56 @@
 import CmuxAgentChat
 import Foundation
 
+/// What established an ``AgentChatSessionRecord/state``.
+///
+/// The distinction only bites on `.idle`, and there it is the difference
+/// between a reading and a placeholder. Activity is self-proving — a `working`
+/// sighting is evidence whoever reported it — but idleness is not: a record
+/// minted from the process table proves an agent is running on the surface and
+/// nothing at all about whether it is mid-turn.
+enum AgentChatSessionStateProvenance: Sendable, Equatable {
+    /// Discovered in the process table (or seeded by a cmux-initiated resume);
+    /// no lifecycle evidence has arrived yet.
+    case unobserved
+    /// Proven by rows the agent itself wrote to its transcript.
+    case transcript
+    /// Reported by the agent's cmux hooks.
+    case hook
+}
+
+/// Maps a chat-session record onto the workspace agent-lifecycle entry cmux
+/// publishes for its surface — the value the sidebar's per-CLI badge strip and
+/// the surface tab-title marker both read.
+///
+/// A pure function beside the record rather than inline in
+/// ``AgentChatTranscriptService`` so "what does cmux claim about this agent"
+/// is testable on its own and cannot drift from the provenance model above.
+enum AgentChatWorkspaceLifecycleMirror {
+    /// - Returns: The lifecycle to write, or `nil` when cmux must publish
+    ///   nothing and clear whatever it wrote earlier.
+    ///
+    ///   `nil` is not "idle". It means cmux has no reading, so the strip draws
+    ///   no pill and the tab keeps its bare title, instead of claiming
+    ///   `💤 Idle` over an agent that may be working. That is the honest answer
+    ///   for a CLI whose hook integration is off or failed to install: cmux can
+    ///   see the process, and that is all it can see.
+    static func lifecycle(
+        for state: ChatAgentState,
+        provenance: AgentChatSessionStateProvenance
+    ) -> AgentHibernationLifecycleState? {
+        switch state {
+        case .ended:
+            return nil
+        case .working:
+            return .running
+        case .needsInput:
+            return .needsInput
+        case .idle:
+            return provenance == .unobserved ? nil : .idle
+        }
+    }
+}
+
 /// One chat-capable agent session the Mac knows about: hook-derived
 /// identity, terminal binding, transcript location, and live state.
 struct AgentChatSessionRecord: Sendable {
@@ -26,9 +76,20 @@ struct AgentChatSessionRecord: Sendable {
     /// Live activity state derived from hook events.
     var state: ChatAgentState
 
+    /// What established ``state``. Every mutator below sets it, so a caller
+    /// asking "may I publish this?" never has to infer the answer from which
+    /// setter happened to run.
+    var stateProvenance: AgentChatSessionStateProvenance = .unobserved
+
     /// Whether `state` has been established by the agent's hook lifecycle.
     /// Process-table discovery proves presence and identity, but not idleness.
-    var hasHookLifecycleState: Bool = false
+    var hasHookLifecycleState: Bool { stateProvenance == .hook }
+
+    /// The workspace agent-lifecycle entry this record implies, or `nil` when
+    /// cmux must publish nothing for it.
+    var workspaceLifecycle: AgentHibernationLifecycleState? {
+        AgentChatWorkspaceLifecycleMirror.lifecycle(for: state, provenance: stateProvenance)
+    }
 
     /// When the record entered `.ended`. Best-effort process observations sampled
     /// before this point must not revive it after a hook or exit watcher ended it.
@@ -65,24 +126,27 @@ struct AgentChatSessionRecord: Sendable {
 
     mutating func setHookLifecycleState(_ nextState: ChatAgentState, at eventAt: Date? = nil) {
         state = nextState
-        hasHookLifecycleState = true
+        stateProvenance = .hook
         lastHookEventAt = eventAt ?? lastActivityAt
     }
 
     /// Applies a state the transcript proved, without claiming hook authority.
     mutating func setTranscriptObservedState(_ nextState: ChatAgentState) {
         state = nextState
-        hasHookLifecycleState = false
+        stateProvenance = .transcript
     }
 
+    /// Records that a live agent process was seen — and nothing more. `.idle`
+    /// here is the record's "no news yet" value, not a claim that the agent is
+    /// waiting, so it stays unpublished until a hook or the transcript speaks.
     mutating func setProcessObservedIdle() {
         state = .idle
-        hasHookLifecycleState = false
+        stateProvenance = .unobserved
     }
 
     mutating func setTranscriptObservedIdle() {
         state = .idle
-        hasHookLifecycleState = false
+        stateProvenance = .transcript
     }
 
     /// Adopts terminal/transcript bindings from a hook-store entry. The
