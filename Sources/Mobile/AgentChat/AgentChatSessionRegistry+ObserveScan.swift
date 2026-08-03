@@ -252,9 +252,14 @@ extension AgentChatSessionRegistry {
                 processArgumentsAndEnvironment: { _ in loadDetails() }
             ),
             def.id == "codex" || def.id == "claude" else { continue }
-            let loadedDetails = loadDetails()
-            let argv = loadedDetails?.arguments
-            let isClaudeForkLaunch = def.id == "claude" && argv.map(Self.containsClaudeForkSessionOption(_:)) == true
+            // Identity first, process details only if the identity still needs
+            // them. Reading another process's argv+environment is a syscall per
+            // process per sweep, and a codex session whose open rollout file
+            // already names it needs neither. The cost of skipping is that
+            // `observedWorkingDirectory` below has no environment to read, so
+            // such a session is reported without a working directory; the hook
+            // lane fills it from `event.cwd` moments later for any codex that
+            // has hooks installed.
             var sessionID: String?
             var transcriptPath: String?
             if def.id == "codex",
@@ -267,6 +272,13 @@ extension AgentChatSessionRegistry {
                 transcriptPath = identity.transcriptPath
                 sessionID = identity.sessionID
             }
+            // Claude is identified from argv/env, and a codex the rollout file
+            // could not name still falls back to argv. `loadDetails` memoizes,
+            // so when classification above already paid for the read this reuses
+            // it — the branch only avoids *adding* one.
+            let loadedDetails = (def.id == "claude" || sessionID == nil) ? loadDetails() : details
+            let argv = loadedDetails?.arguments
+            let isClaudeForkLaunch = def.id == "claude" && argv.map(Self.containsClaudeForkSessionOption(_:)) == true
             if def.id == "claude",
                !isClaudeForkLaunch,
                let envSessionID = loadedDetails?.environment["CLAUDE_CODE_SESSION_ID"],
