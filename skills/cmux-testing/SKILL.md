@@ -46,7 +46,7 @@ Swift Testing (Swift 6 / Xcode 16) is the default for every unit and integration
 
 `reload.sh` builds only the `cmux` scheme, so a green reload says nothing about whether `cmuxTests`/`cmuxUITests` still compile. A moved or renamed symbol can keep the app building while breaking the test target (real case: a `write(to:atomically:)` typo and a removed `TabManager.CommandResult` surfaced only in the `tests` job). Build the `cmux-unit` scheme with `-derivedDataPath /tmp/cmux-<tag>` (plus the GlobalISel workaround flag for `cmuxApp`/`AppDelegate` churn) before pushing.
 
-This is not optional and has no CI fallback: the `tests` job only runs on `workflow_dispatch`. `cmuxTests` sat uncompilable across three merged PRs precisely because that fallback was assumed — two suspension suites called initializers that had gained parameters, so *every* suite in the target ran zero tests while the `cmux` scheme stayed green. When a target stops compiling, "0 tests executed" and "all tests passed" look identical in a summary; read the counts.
+There is no CI fallback: the `tests` job only runs on `workflow_dispatch`. A target that stops compiling reports "0 tests executed", which reads like a pass — check the count.
 
 ## Detailed references
 
