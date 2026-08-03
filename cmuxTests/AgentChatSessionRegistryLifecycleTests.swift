@@ -530,3 +530,181 @@ struct AgentChatSessionRegistryLifecycleTests {
         try data.write(to: directory.appendingPathComponent("claude-hook-sessions.json"))
     }
 }
+
+/// Regression tests for the sidebar drawing `💤 Idle` over an agent that is
+/// mid-turn.
+///
+/// A Claude Code session launched with the cmux hook integration off
+/// (`automation.claudeCodeIntegration: false`, which exports
+/// `CMUX_CLAUDE_HOOKS_DISABLED=1` and makes `cmux-claude-wrapper` inject no
+/// hooks) reaches the registry through one lane only: the process table.
+/// ``AgentChatSessionRecord/hasHookLifecycleState`` documents that lane as
+/// proving "presence and identity, but not idleness" — yet its placeholder
+/// `.idle` was mirrored onto the surface as an `agentchat.<cli>` lifecycle
+/// entry, which the sidebar's per-CLI badge strip and the surface tab title
+/// both render as `💤`. Nothing could move it off `💤` afterwards either: only
+/// the Codex and Antigravity transcript parsers emit state updates, so the pill
+/// said "Idle" for the entire time Claude Code was working.
+@MainActor
+struct AgentChatWorkspaceLifecycleMirrorTests {
+    private static let claudeMirrorKey = "agentchat.claude"
+    private static let codexMirrorKey = "agentchat.codex"
+    private let baseTime = Date(timeIntervalSince1970: 1_781_006_400)
+
+    @MainActor
+    private struct Fixture {
+        let registry: AgentChatSessionRegistry
+        let service: AgentChatTranscriptService
+        let workspace: Workspace
+        let panelId: UUID
+        let restore: () -> Void
+
+        var surfaceID: String { panelId.uuidString }
+        var workspaceID: String { workspace.id.uuidString }
+
+        /// The lifecycle entry the sidebar badge strip and the tab title read.
+        func mirroredLifecycle(_ key: String) -> AgentHibernationLifecycleState? {
+            workspace.agentLifecycleStatesByPanelId[panelId]?[key]
+        }
+    }
+
+    /// A workspace registered with the live `AppDelegate`, because the mirror
+    /// resolves its target through `AppDelegate.workspaceFor(tabId:)` — a
+    /// detached `Workspace()` would make every assertion vacuously pass.
+    private func makeFixture() throws -> Fixture {
+        let appDelegate = AppDelegate.shared ?? AppDelegate()
+        let manager = appDelegate.tabManager ?? TabManager()
+        let originalTabManager = appDelegate.tabManager
+        appDelegate.tabManager = manager
+        let workspace = manager.addWorkspace(select: false)
+        let panelId = try #require(workspace.focusedPanelId)
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-agent-chat-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let registry = AgentChatSessionRegistry()
+        let service = AgentChatTranscriptService(
+            registry: registry,
+            resolver: AgentChatTranscriptResolver(homeDirectory: home, environment: [:]),
+            hasEventSubscribers: { false },
+            emitEventPayload: { _ in }
+        )
+        return Fixture(
+            registry: registry,
+            service: service,
+            workspace: workspace,
+            panelId: panelId,
+            restore: {
+                // The registry holds the service weakly through
+                // `onRecordChanged`; keep it alive for the whole test.
+                withExtendedLifetime(service) {}
+                if manager.tabs.contains(where: { $0.id == workspace.id }) {
+                    manager.closeWorkspace(workspace)
+                }
+                appDelegate.tabManager = originalTabManager
+                try? FileManager.default.removeItem(at: home)
+            }
+        )
+    }
+
+    /// What the process-table sweep reports for a hook-less `claude` running on
+    /// the surface: an alive pid, a surface binding, and no transcript yet.
+    private func observedClaudeProcess(_ fixture: Fixture, at timestamp: Date) -> ObservedAgentSession {
+        ObservedAgentSession(
+            sessionID: AgentChatSessionRegistry.pendingClaudeSessionID(surfaceID: fixture.surfaceID),
+            agentKind: .claude,
+            surfaceID: fixture.surfaceID,
+            workspaceID: fixture.workspaceID,
+            // The test process itself: a genuinely live pid, so the registry's
+            // exit watcher cannot race the assertion by ending the record.
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            workingDirectory: "/Users/example/project",
+            transcriptPath: nil,
+            sampledAt: timestamp
+        )
+    }
+
+    @Test func processDiscoveredAgentPublishesNoStatusOntoItsSurface() throws {
+        let fixture = try makeFixture()
+        defer { fixture.restore() }
+
+        fixture.registry.applyObservedSessions([observedClaudeProcess(fixture, at: baseTime)])
+
+        // Presence and identity were proven, so the record exists ...
+        let sessionID = AgentChatSessionRegistry.pendingClaudeSessionID(surfaceID: fixture.surfaceID)
+        #expect(fixture.registry.record(sessionID: sessionID) != nil)
+        // ... but nothing proved the agent is *idle*, and a working agent is
+        // exactly what the process table cannot rule out. Publish nothing.
+        #expect(fixture.mirroredLifecycle(Self.claudeMirrorKey) == nil)
+    }
+
+    @Test func hookReportedIdlePublishesIdleEvenWhenProcessDiscoveryFoundItFirst() throws {
+        let fixture = try makeFixture()
+        defer { fixture.restore() }
+        let hookSessionID = "24ec0052-450c-4914-b1dd-2ee80d4bc84b"
+
+        fixture.registry.applyObservedSessions([observedClaudeProcess(fixture, at: baseTime)])
+        // SessionStart reports `.idle` — the same value the process lane already
+        // held, so only its provenance changed. The sidebar must start showing
+        // it: this one is a reading, not a placeholder.
+        _ = fixture.service.noteHookEvent(WorkstreamEvent(
+            sessionId: hookSessionID,
+            hookEventName: .sessionStart,
+            source: "claude",
+            workspaceId: fixture.workspaceID,
+            surfaceId: fixture.surfaceID,
+            transcriptPath: nil,
+            cwd: "/Users/example/project",
+            ppid: Int(ProcessInfo.processInfo.processIdentifier),
+            receivedAt: baseTime.addingTimeInterval(1)
+        ))
+
+        #expect(fixture.mirroredLifecycle(Self.claudeMirrorKey) == .idle)
+    }
+
+    @Test func hookReportedWorkingPublishesRunning() throws {
+        let fixture = try makeFixture()
+        defer { fixture.restore() }
+        let hookSessionID = "24ec0052-450c-4914-b1dd-2ee80d4bc84b"
+
+        fixture.registry.applyObservedSessions([observedClaudeProcess(fixture, at: baseTime)])
+        _ = fixture.service.noteHookEvent(WorkstreamEvent(
+            sessionId: hookSessionID,
+            hookEventName: .userPromptSubmit,
+            source: "claude",
+            workspaceId: fixture.workspaceID,
+            surfaceId: fixture.surfaceID,
+            transcriptPath: nil,
+            cwd: "/Users/example/project",
+            ppid: Int(ProcessInfo.processInfo.processIdentifier),
+            receivedAt: baseTime.addingTimeInterval(1)
+        ))
+
+        #expect(fixture.mirroredLifecycle(Self.claudeMirrorKey) == .running)
+    }
+
+    @Test func transcriptProvenIdleStillPublishesIdle() throws {
+        let fixture = try makeFixture()
+        defer { fixture.restore() }
+        let sessionID = "019fc599-2304-7fe0-8cbd-886d17d6241b"
+
+        // The Codex/Antigravity lane: the transcript itself proves the agent
+        // started and then settled, so both states are readings and both must
+        // reach the sidebar.
+        fixture.registry.adoptDetectedSession(
+            sessionID: sessionID,
+            agentKind: .codex,
+            workspaceID: fixture.workspaceID,
+            surfaceID: fixture.surfaceID,
+            workingDirectory: "/Users/example/project",
+            transcriptPath: nil,
+            at: baseTime
+        )
+        #expect(fixture.mirroredLifecycle(Self.codexMirrorKey) == nil)
+
+        fixture.registry.noteTranscriptWorking(sessionID: sessionID, at: baseTime.addingTimeInterval(1))
+        #expect(fixture.mirroredLifecycle(Self.codexMirrorKey) == .running)
+
+        fixture.registry.noteTranscriptWorkingResolved(sessionID: sessionID, at: baseTime.addingTimeInterval(2))
+        #expect(fixture.mirroredLifecycle(Self.codexMirrorKey) == .idle)
+    }
+}
