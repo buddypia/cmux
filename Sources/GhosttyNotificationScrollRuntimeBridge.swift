@@ -1,6 +1,5 @@
 import Foundation
 import CmuxTerminal
-import CmuxTerminalCore
 
 extension TerminalPanel {
     func performInternalBindingAction(_ action: String) -> Bool {
@@ -45,12 +44,40 @@ extension GhosttyNSView {
         return { retention.release() }
     }
 
-    // The two Ghostty scrollbar entry points that used to live here are
-    // declared in the `GhosttyNSView` class body instead — see
-    // "Scrollbar runtime seam" in GhosttyTerminalView.swift. They must be
-    // overridable by the scroll-restore tests' stub subclass, and an extension
-    // method is only overridable through `@objc dynamic`, which these
-    // signatures can no longer take: `ghostty_surface_scrollbar_s` now arrives
-    // through the CmuxTerminalCore Swift module rather than the Objective-C
-    // bridging header, so it is not representable in Objective-C.
+    /// Retains rendered-frame notifications for only this terminal view.
+    func retainLocalRenderedFrameNotifications() -> () -> Void {
+        let retention = localRenderedFrameNotificationDemand.retain()
+        return { retention.release() }
+    }
+
+    var renderedFrameNotificationDemandIsActive: Bool {
+        GhosttyApp.renderedFrameNotificationDemand.isActive
+            || localRenderedFrameNotificationDemand.isActive
+    }
+
+    var localRenderedFrameNotificationDemandIsActive: Bool {
+        localRenderedFrameNotificationDemand.isActive
+    }
+
+    @objc dynamic func readAuthoritativeScrollbar(
+        _ result: UnsafeMutablePointer<ghostty_surface_scrollbar_s>
+    ) -> Bool {
+        guard let surface = terminalSurface?.surface else { return false }
+        return ghostty_surface_scrollbar(surface, result)
+    }
+
+    @objc dynamic func scrollToRow(
+        _ row: UInt64,
+        ifRowSpaceRevisionMatches rowSpaceRevision: UInt64,
+        result: UnsafeMutablePointer<ghostty_surface_scrollbar_s>
+    ) -> Bool {
+        guard let surface = terminalSurface?.surface else { return false }
+        return ghostty_surface_scroll_to_row_if_revision(
+            surface,
+            row,
+            rowSpaceRevision,
+            result
+        )
+    }
+
 }

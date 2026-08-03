@@ -1,6 +1,6 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClientInfo, CmuxClient } from "cmux/browser";
+import type { ClientInfo, CmuxClient } from "cmux/raw";
 import { TerminalPane } from "../src/components/TerminalPane";
 import type { ScreenView } from "../src/lib/tree";
 
@@ -43,10 +43,10 @@ beforeEach(() => {
   attachedTerminal.renderHook.mockClear();
 });
 
-function screenView(ratio: number, zoomedPane: number | null = null): ScreenView {
+function screenView(ratio: number, zoomedPane: bigint | null = null): ScreenView {
   return {
-    id: 10,
-    workspaceId: 9,
+    id: 10n,
+    workspaceId: 9n,
     label: "test",
     active: true,
     pane: null,
@@ -54,19 +54,19 @@ function screenView(ratio: number, zoomedPane: number | null = null): ScreenView
     panes: [],
     layout: {
       type: "split",
-      split: 42,
+      split: 42n,
       dir: "right",
       ratio,
-      a: { type: "leaf", pane: 1 },
-      b: { type: "leaf", pane: 2 },
+      a: { type: "leaf", pane: 1n },
+      b: { type: "leaf", pane: 2n },
     },
-    activePane: 1,
+    activePane: 1n,
     zoomedPane,
     unread: false,
   };
 }
 
-function terminalPaneProps(onSetSplitRatio: (split: number, ratio: number) => Promise<boolean>) {
+function terminalPaneProps(onSetSplitRatio: (split: bigint, ratio: number) => Promise<boolean>) {
   return {
     client: null as CmuxClient | null,
     clients: [] as ClientInfo[],
@@ -91,13 +91,13 @@ function terminalPaneProps(onSetSplitRatio: (split: number, ratio: number) => Pr
 function terminalScreenView(): ScreenView {
   return {
     ...screenView(0.5),
-    layout: { type: "leaf", pane: 1 },
+    layout: { type: "leaf", pane: 1n },
     panes: [{
-      id: 1,
+      id: 1n,
       name: null,
-      active_tab: 0,
+      active_tab: 0n,
       tabs: [{
-        surface: 7,
+        surface: 7n,
         kind: "pty",
         browser_source: null,
         name: null,
@@ -114,7 +114,7 @@ describe("TerminalPane split dividers", () => {
     const props = terminalPaneProps(vi.fn(async () => true));
     const { queryByRole, rerender } = render(<TerminalPane {...props} screen={screenView(0.5)} />);
     expect(queryByRole("separator")).toHaveAttribute("aria-orientation", "vertical");
-    rerender(<TerminalPane {...props} screen={screenView(0.5, 1)} />);
+    rerender(<TerminalPane {...props} screen={screenView(0.5, 1n)} />);
     expect(queryByRole("separator")).toBeNull();
   });
 
@@ -131,11 +131,11 @@ describe("TerminalPane split dividers", () => {
 
     fireEvent.keyDown(divider, { key: "ArrowRight" });
 
-    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42, 0.55));
+    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42n, 0.55));
   });
 
   it("queues repeated arrow-key adjustments without dropping input", async () => {
-    const onSetSplitRatio = vi.fn(async (_split: number, _ratio: number) => true);
+    const onSetSplitRatio = vi.fn(async (_split: bigint, _ratio: number) => true);
     const props = terminalPaneProps(onSetSplitRatio);
     const { getByRole } = render(<TerminalPane {...props} screen={screenView(0.5)} />);
     const divider = getByRole("separator");
@@ -145,14 +145,14 @@ describe("TerminalPane split dividers", () => {
     fireEvent.keyDown(divider, { key: "ArrowRight" });
 
     await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledTimes(1));
-    expect(onSetSplitRatio.mock.calls[0]?.[0]).toBe(42);
+    expect(onSetSplitRatio.mock.calls[0]?.[0]).toBe(42n);
     expect(onSetSplitRatio.mock.calls[0]?.[1]).toBeCloseTo(0.65);
   });
 
   it("debounces locally completed key repeats into one authoritative commit", async () => {
     vi.useFakeTimers();
     try {
-      const onSetSplitRatio = vi.fn(async (_split: number, _ratio: number) => true);
+      const onSetSplitRatio = vi.fn(async (_split: bigint, _ratio: number) => true);
       const props = terminalPaneProps(onSetSplitRatio);
       const { getByRole } = render(<TerminalPane {...props} screen={screenView(0.5)} />);
       const divider = getByRole("separator");
@@ -180,7 +180,7 @@ describe("TerminalPane split dividers", () => {
     let resolveFirst: (succeeded: boolean) => void = (_succeeded) => {
       throw new Error("first request was not started");
     };
-    const onSetSplitRatio = vi.fn((_split: number, ratio: number) => {
+    const onSetSplitRatio = vi.fn((_split: bigint, ratio: number) => {
       if (ratio !== 0.55) return Promise.resolve(true);
       return new Promise<boolean>((resolve) => {
         resolveFirst = resolve;
@@ -201,7 +201,7 @@ describe("TerminalPane split dividers", () => {
       await act(async () => vi.advanceTimersByTimeAsync(100));
 
       expect(onSetSplitRatio).toHaveBeenCalledTimes(2);
-      expect(onSetSplitRatio.mock.calls[1]?.[0]).toBe(42);
+      expect(onSetSplitRatio.mock.calls[1]?.[0]).toBe(42n);
       expect(onSetSplitRatio.mock.calls[1]?.[1]).toBeCloseTo(0.5);
     } finally {
       vi.useRealTimers();
@@ -217,7 +217,7 @@ describe("TerminalPane split dividers", () => {
     Object.defineProperty(divider, "setPointerCapture", { value: setPointerCapture });
 
     fireEvent.keyDown(divider, { key: "ArrowRight" });
-    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42, 0.55));
+    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42n, 0.55));
     rerender(<TerminalPane {...props} screen={screenView(0.55)} />);
     fireEvent.pointerDown(getByRole("separator"), {
       pointerId: 12,
@@ -246,7 +246,7 @@ describe("TerminalPane split dividers", () => {
 
     const replacement = screenView(0.5);
     if (replacement.layout?.type !== "split") throw new Error("expected split layout");
-    replacement.layout.split = 43;
+    replacement.layout.split = 43n;
     rerender(<TerminalPane {...props} screen={replacement} />);
     await act(async () => resolveFirst(true));
 
@@ -254,7 +254,7 @@ describe("TerminalPane split dividers", () => {
   });
 
   it("uses a later authoritative ratio after a keyboard transaction settles", async () => {
-    const onSetSplitRatio = vi.fn(async (_split: number, _ratio: number) => true);
+    const onSetSplitRatio = vi.fn(async (_split: bigint, _ratio: number) => true);
     const props = terminalPaneProps(onSetSplitRatio);
     const { getByRole, rerender } = render(<TerminalPane {...props} screen={screenView(0.5)} />);
     const divider = getByRole("separator");
@@ -306,7 +306,7 @@ describe("TerminalPane split dividers", () => {
     fireEvent.pointerUp(divider, { pointerId: 7, pointerType: "touch", clientX: 400, clientY: 100 });
 
     await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledTimes(1));
-    expect(onSetSplitRatio).toHaveBeenCalledWith(42, 0.75);
+    expect(onSetSplitRatio).toHaveBeenCalledWith(42n, 0.75);
 
     rerender(<TerminalPane {...props} screen={screenView(0.75)} />);
     rerender(<TerminalPane {...props} screen={screenView(0.6)} />);
@@ -317,7 +317,7 @@ describe("TerminalPane split dividers", () => {
     let resolvePointer: (succeeded: boolean) => void = (_succeeded) => {
       throw new Error("pointer request was not started");
     };
-    const onSetSplitRatio = vi.fn((_split: number, ratio: number) => {
+    const onSetSplitRatio = vi.fn((_split: bigint, ratio: number) => {
       if (ratio !== 0.75) return Promise.resolve(true);
       return new Promise<boolean>((resolve) => {
         resolvePointer = resolve;
@@ -345,7 +345,7 @@ describe("TerminalPane split dividers", () => {
 
     fireEvent.pointerDown(divider, { pointerId: 13, pointerType: "mouse", button: 0, clientX: 200 });
     fireEvent.pointerUp(divider, { pointerId: 13, pointerType: "mouse", button: 0, clientX: 300 });
-    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42, 0.75));
+    await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledWith(42n, 0.75));
 
     fireEvent.keyDown(divider, { key: "ArrowRight" });
     await waitFor(() => expect(onSetSplitRatio).toHaveBeenCalledTimes(2));
@@ -409,7 +409,7 @@ describe("TerminalPane split dividers", () => {
     fireEvent.pointerDown(divider, { pointerId: 9, pointerType: "touch", clientX: 200 });
     const replacement = screenView(0.5);
     if (replacement.layout?.type !== "split") throw new Error("expected split layout");
-    replacement.layout.split = 43;
+    replacement.layout.split = 43n;
     rerender(<TerminalPane {...props} screen={replacement} />);
     fireEvent.pointerUp(getByRole("separator"), {
       pointerId: 9,
@@ -421,67 +421,199 @@ describe("TerminalPane split dividers", () => {
   });
 });
 
+describe("TerminalPane stacks", () => {
+  it("renders collapsed title rows around the expanded pane", () => {
+    const props = terminalPaneProps(vi.fn(async () => true));
+    props.client = { protocol: 9 } as CmuxClient;
+    const screen: ScreenView = {
+      ...screenView(0.5),
+      layout: { type: "stack", panes: [1n, 2n, 3n], expanded: 2n },
+      activePane: 2n,
+      panes: [1n, 2n, 3n].map((id) => ({
+        id,
+        name: null,
+        active_tab: 0n,
+        tabs: [{
+          surface: id + 10n,
+          kind: "pty" as const,
+          browser_source: null,
+          name: null,
+          title: `shell ${id}`,
+          size: { cols: 80, rows: 24 },
+          dead: false,
+        }],
+      })),
+    };
+
+    const { container, queryByRole, rerender } = render(<TerminalPane {...props} screen={screen} />);
+    const stack = container.querySelector(".pane-stack");
+    expect(stack).toBeInTheDocument();
+    expect(stack?.querySelectorAll(".pane-leaf.collapsed")).toHaveLength(2);
+    expect(stack?.querySelectorAll(":scope > .pane-leaf.expanded")).toHaveLength(1);
+    expect(stack?.querySelectorAll(":scope > .stack-pane-headers")).toHaveLength(2);
+    expect(stack?.children[0]).toHaveClass("stack-pane-headers", "before");
+    expect(stack?.children[1]).toHaveClass("expanded");
+    expect(stack?.children[2]).toHaveClass("stack-pane-headers", "after");
+    expect(attachedTerminal.renderHook).toHaveBeenCalledTimes(1);
+
+    const firstHeader = stack!.children[0]!.querySelector(".stack-pane-header")!;
+    fireEvent.click(firstHeader);
+    expect(props.onSelectPane).toHaveBeenCalledWith(1n);
+
+    props.onSelectPane.mockClear();
+    fireEvent.contextMenu(firstHeader);
+    expect(props.onSelectPane).not.toHaveBeenCalled();
+
+    fireEvent.focusIn(stack!.children[2]!.querySelector(".stack-pane-header")!);
+    expect(props.onSelectPane).not.toHaveBeenCalled();
+
+    fireEvent.click(stack!.children[2]!.querySelector(".stack-pane-header")!);
+    expect(props.onSelectPane).toHaveBeenCalledWith(3n);
+
+    fireEvent.contextMenu(stack!.querySelector(".pane-leaf.expanded .terminal-panel")!, {
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(queryByRole("menu")).toBeInTheDocument();
+    rerender(
+      <TerminalPane
+        {...props}
+        screen={{
+          ...screen,
+          activePane: 3n,
+          layout: { type: "stack", panes: [1n, 2n, 3n], expanded: 3n },
+        }}
+      />,
+    );
+    expect(queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(
+      container.querySelector(".pane-leaf.expanded [data-render-input]"),
+    );
+  });
+});
+
 describe("TerminalPane shared minimum size", () => {
   it("shows the exact surface viewers in the bottom-left border", () => {
     const props = terminalPaneProps(vi.fn(async () => true));
     props.clients = [
       {
-        client: 1,
+        client: 1n,
         transport: "ws",
         name: "browser",
         kind: "web",
-        connected_seconds: 10,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 120, rows: 30 }],
+        connected_seconds: 10n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 120, rows: 30, size_participating: true }],
         self: true,
-        size_participating: true,
       },
       {
-        client: 2,
+        client: 2n,
         transport: "unix",
         name: "small tui",
         kind: "tui",
-        connected_seconds: 20,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 80, rows: 40 }],
+        connected_seconds: 20n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 80, rows: 40, size_participating: true }],
         self: false,
-        size_participating: true,
       },
     ];
 
-    const { getByRole } = render(<TerminalPane {...props} screen={terminalScreenView()} />);
+    const { getAllByRole, getByRole } = render(
+      <TerminalPane {...props} screen={terminalScreenView()} />,
+    );
     const trigger = getByRole("button", { name: "2 clients · 80×30 min" });
+    fireEvent.click(trigger);
+    fireEvent.click(getAllByRole("menuitem", { name: "Use only this client size" })[0]);
+
+    expect(props.onUseOnlyClientSizing).toHaveBeenCalledWith(7n, 1n);
+
     fireEvent.click(trigger);
     fireEvent.click(getByRole("menuitem", { name: "Use all client sizes" }));
 
-    expect(props.onRefreshClients).toHaveBeenCalledOnce();
-    expect(props.onUseAllClientSizing).toHaveBeenCalledOnce();
+    expect(props.onRefreshClients).toHaveBeenCalledTimes(2);
+    expect(props.onUseAllClientSizing).toHaveBeenCalledWith(7n);
+  });
+
+  it("keeps an open sizing menu bound to the surface that opened it", () => {
+    const props = terminalPaneProps(vi.fn(async () => true));
+    props.clients = [
+      {
+        client: 1n,
+        transport: "ws",
+        name: "browser",
+        kind: "web",
+        connected_seconds: 10n,
+        attached: [7n, 8n],
+        sizes: [
+          { surface: 7n, cols: 120, rows: 30, size_participating: true },
+          { surface: 8n, cols: 110, rows: 35, size_participating: true },
+        ],
+        self: true,
+      },
+      {
+        client: 2n,
+        transport: "unix",
+        name: "small tui",
+        kind: "tui",
+        connected_seconds: 20n,
+        attached: [7n, 8n],
+        sizes: [
+          { surface: 7n, cols: 80, rows: 40, size_participating: true },
+          { surface: 8n, cols: 90, rows: 25, size_participating: true },
+        ],
+        self: false,
+      },
+    ];
+    const firstScreen = terminalScreenView();
+    const firstPane = firstScreen.panes[0]!;
+    const secondScreen: ScreenView = {
+      ...firstScreen,
+      panes: [{
+        ...firstPane,
+        active_tab: 1n,
+        tabs: [
+          ...firstPane.tabs,
+          {
+            ...firstPane.tabs[0]!,
+            surface: 8n,
+            title: "other shell",
+          },
+        ],
+      }],
+    };
+
+    const { getAllByRole, getByRole, rerender } = render(
+      <TerminalPane {...props} screen={firstScreen} />,
+    );
+    fireEvent.click(getByRole("button", { name: "2 clients · 80×30 min" }));
+    rerender(<TerminalPane {...props} screen={secondScreen} />);
+    fireEvent.click(getAllByRole("menuitem", { name: "Use only this client size" })[0]);
+
+    expect(props.onUseOnlyClientSizing).toHaveBeenCalledWith(7n, 1n);
   });
 
   it("uses the tmux fallback minimum when every attached viewer is excluded", () => {
     const props = terminalPaneProps(vi.fn(async () => true));
     props.clients = [
       {
-        client: 1,
+        client: 1n,
         transport: "ws",
         name: "browser",
         kind: "web",
-        connected_seconds: 10,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 120, rows: 30 }],
+        connected_seconds: 10n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 120, rows: 30, size_participating: false }],
         self: true,
-        size_participating: false,
       },
       {
-        client: 2,
+        client: 2n,
         transport: "unix",
         name: "small tui",
         kind: "tui",
-        connected_seconds: 20,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 80, rows: 40 }],
+        connected_seconds: 20n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 80, rows: 40, size_participating: false }],
         self: false,
-        size_participating: false,
       },
     ];
 
@@ -493,26 +625,24 @@ describe("TerminalPane shared minimum size", () => {
     const props = terminalPaneProps(vi.fn(async () => true));
     props.clients = [
       {
-        client: 1,
+        client: 1n,
         transport: "ws",
         name: "browser",
         kind: "web",
-        connected_seconds: 10,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 120, rows: 30 }],
+        connected_seconds: 10n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 120, rows: 30, size_participating: true }],
         self: true,
-        size_participating: true,
       },
       {
-        client: 2,
+        client: 2n,
         transport: "unix",
         name: "other tab",
         kind: "tui",
-        connected_seconds: 20,
-        attached: [8],
-        sizes: [{ surface: 8, cols: 80, rows: 40 }],
+        connected_seconds: 20n,
+        attached: [8n],
+        sizes: [{ surface: 8n, cols: 80, rows: 40, size_participating: true }],
         self: false,
-        size_participating: true,
       },
     ];
 
@@ -525,26 +655,24 @@ describe("TerminalPane shared minimum size", () => {
     const props = terminalPaneProps(vi.fn(async () => true));
     props.clients = [
       {
-        client: 1,
+        client: 1n,
         transport: "ws",
         name: "This browser",
         kind: "web",
-        connected_seconds: 10,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 126, rows: 38 }],
+        connected_seconds: 10n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 126, rows: 38, size_participating: true }],
         self: true,
-        size_participating: true,
       },
       {
-        client: 2,
+        client: 2n,
         transport: "unix",
         name: "office tmux",
         kind: "tui",
-        connected_seconds: 20,
-        attached: [7],
-        sizes: [{ surface: 7, cols: 126, rows: 38 }],
+        connected_seconds: 20n,
+        attached: [7n],
+        sizes: [{ surface: 7n, cols: 126, rows: 38, size_participating: true }],
         self: false,
-        size_participating: true,
       },
     ];
 
@@ -562,16 +690,15 @@ describe("TerminalPane shared minimum size", () => {
   it("does not show an ownership hint for multiple limiting clients", () => {
     attachedTerminal.foreignSize = { cols: 126, rows: 38 };
     const props = terminalPaneProps(vi.fn(async () => true));
-    props.clients = [2, 3].map((client) => ({
+    props.clients = [2n, 3n].map((client) => ({
       client,
       transport: "ws" as const,
       name: `browser ${client}`,
       kind: "web",
-      connected_seconds: 10,
-      attached: [7],
-      sizes: [{ surface: 7, cols: 126, rows: 38 }],
+      connected_seconds: 10n,
+      attached: [7n],
+      sizes: [{ surface: 7n, cols: 126, rows: 38, size_participating: true }],
       self: false,
-      size_participating: true,
     }));
 
     const { queryByText } = render(<TerminalPane {...props} screen={terminalScreenView()} />);
@@ -609,5 +736,45 @@ describe("TerminalPane renderer selection", () => {
     rerender(<TerminalPane {...props} screen={terminalScreenView()} />);
     expect(attachedTerminal.byteHook).toHaveBeenCalledTimes(1);
     expect(attachedTerminal.renderHook).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalPane stack indexing", () => {
+  it("does not scan the full pane list for every stack row", () => {
+    const panes: ScreenView["panes"] = Array.from({ length: 13 }, (_, index) => ({
+      id: BigInt(index + 1),
+      name: null,
+      active_tab: 0n,
+      tabs: [{
+        surface: BigInt(index + 100),
+        kind: "pty" as const,
+        browser_source: null,
+        name: null,
+        title: `pane ${index + 1}`,
+        size: { cols: 80, rows: 24 },
+        dead: false,
+      }],
+    }));
+    let findCalls = 0;
+    const trackedPanes = new Proxy(panes, {
+      get(target, property, receiver) {
+        if (property === "find") findCalls += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const screen: ScreenView = {
+      ...screenView(0.5),
+      panes: trackedPanes,
+      layout: {
+        type: "stack",
+        panes: [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n, 11n, 12n, 13n],
+        expanded: 7n,
+      },
+      activePane: 7n,
+    };
+
+    render(<TerminalPane {...terminalPaneProps(vi.fn(async () => true))} screen={screen} />);
+
+    expect(findCalls).toBe(0);
   });
 });

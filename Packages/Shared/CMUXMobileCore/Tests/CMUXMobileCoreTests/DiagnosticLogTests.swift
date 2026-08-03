@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import os
 @testable import CMUXMobileCore
 
 @Suite struct DiagnosticLogTests {
@@ -24,6 +25,10 @@ import Testing
             if await log.processedCount() >= expected { return }
             await Task.yield()
         }
+        #expect(
+            await log.processedCount() >= expected,
+            "diagnostic drain did not reach the required barrier"
+        )
     }
 
     /// Record one event and await it draining into the ring, so the next record
@@ -67,6 +72,50 @@ import Testing
         #expect(lines[1] == "1000,1,,,,,")
         #expect(lines[2] == "2000,2,,250,,,")
         #expect(lines[3] == "3000,7,7,,10,20,")
+    }
+
+    @Test func duplicateSelectedPathNotificationsDoNotExportFalseChanges() async {
+        let log = DiagnosticLog(capacity: 16)
+        log.record(DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 1_000,
+            a: DiagnosticPathKind.relay.rawValue
+        ))
+        log.record(DiagnosticEvent(
+            code: .transportSessionLifecycle,
+            tNanos: 2_000,
+            a: DiagnosticSessionLifecycleKind.established.rawValue,
+            b: Int(CmxTransportSessionPurpose.foregroundControl.rawValue),
+            c: 1
+        ))
+        log.record(DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 3_000,
+            a: DiagnosticPathKind.relay.rawValue
+        ))
+        log.record(DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 4_000,
+            a: DiagnosticPathKind.privateNetwork.rawValue
+        ))
+        log.record(DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 5_000,
+            a: DiagnosticPathKind.privateNetwork.rawValue
+        ))
+        await waitForProcessed(log, 5)
+
+        let report = await log.snapshot()
+        #expect(report.events.map(\.code) == [
+            .selectedPathChanged,
+            .transportSessionLifecycle,
+            .selectedPathChanged,
+        ])
+        #expect(report.events.compactMap(\.diagnosticPathKind) == [
+            .relay,
+            .privateNetwork,
+        ])
+        #expect(report.events[1].diagnosticSessionLifecycleKind == .established)
     }
 
     @Test func ringEvictionDropsOldest() async {
@@ -183,7 +232,33 @@ import Testing
         #expect(DiagnosticEventCode.admissionFailed.rawValue == 48)
         #expect(DiagnosticEventCode.hostAuthenticationFailed.rawValue == 49)
         #expect(DiagnosticEventCode.rpcFailed.rawValue == 50)
+        #expect(DiagnosticEventCode.transportSessionLifecycle.rawValue == 51)
+        #expect(DiagnosticEventCode.transportCloseAttribution.rawValue == 54)
+        #expect(DiagnosticEventCode.transportPathEvent.rawValue == 55)
         #expect(Set(DiagnosticEventCode.allCases.map(\.rawValue)).count == DiagnosticEventCode.allCases.count)
+    }
+
+    @Test func closeAttributionAndPathEventsExposeTypedPayloads() {
+        let close = DiagnosticEvent(
+            code: .transportCloseAttribution,
+            tNanos: 10,
+            ms: 42,
+            a: 2,
+            b: DiagnosticFailureKind.connectionClosed.rawValue,
+            c: 7
+        )
+        let path = DiagnosticEvent(
+            code: .transportPathEvent,
+            tNanos: 11,
+            a: 3,
+            b: DiagnosticPathKind.privateNetwork.rawValue,
+            c: 7
+        )
+
+        #expect(close.diagnosticFailureKind == .connectionClosed)
+        #expect(close.diagnosticSessionID == 7)
+        #expect(path.diagnosticPathKind == .privateNetwork)
+        #expect(path.diagnosticSessionID == 7)
     }
 
     @Test func diagnosticTaxonomyHasStableRawValuesAndRedactedMappings() {
@@ -193,7 +268,27 @@ import Testing
         #expect(DiagnosticTransportKind(.debugLoopback) == .debugLoopback)
         #expect(CmxAttachTransportKind.iroh.diagnosticTransportKind.rawValue == 1)
         #expect(DiagnosticFailureKind.cancelled.rawValue == 20)
+        #expect(DiagnosticFailureKind.transportIdleTimedOut.rawValue == 21)
+        #expect(DiagnosticFailureKind.admissionLeaseExpired.rawValue == 22)
+        #expect(DiagnosticFailureKind.admissionRevalidationFailed.rawValue == 23)
+        #expect(DiagnosticFailureKind.sendQueueOverflow.rawValue == 24)
+        #expect(DiagnosticFailureKind.routeGated.rawValue == 25)
+        #expect(
+            Set(DiagnosticFailureKind.allCases.map(\.rawValue)).count
+                == DiagnosticFailureKind.allCases.count
+        )
         #expect(DiagnosticFailureKind.unknown.rawValue == 255)
+        #expect(DiagnosticSessionLifecycleKind.established.rawValue == 1)
+        #expect(DiagnosticSessionLifecycleKind.controlOwnerReleased.rawValue == 2)
+        #expect(DiagnosticSessionLifecycleKind.controlReadFailed.rawValue == 3)
+        #expect(DiagnosticSessionLifecycleKind.controlWriteFailed.rawValue == 4)
+        #expect(DiagnosticSessionLifecycleKind.remoteClosed.rawValue == 5)
+        #expect(DiagnosticSessionLifecycleKind.closedSessionEvicted.rawValue == 6)
+        #expect(DiagnosticSessionLifecycleKind.applicationLaneFailed.rawValue == 7)
+        #expect(DiagnosticSessionLifecycleKind.runtimeDeactivated.rawValue == 8)
+        #expect(DiagnosticSessionLifecycleKind.runtimeReconfigured.rawValue == 9)
+        #expect(DiagnosticSessionLifecycleKind.explicitlyInvalidated.rawValue == 10)
+        #expect(DiagnosticSessionLifecycleKind.allPathsClosed.rawValue == 11)
 
         #expect(DiagnosticPathKind(.unavailable) == .unknown)
         #expect(DiagnosticPathKind(.direct) == .direct)
@@ -345,6 +440,27 @@ import Testing
             #expect(report.lastFailureKind == .protocolViolation)
             #expect(report.lastFailureDate != nil)
         }
+    }
+
+    @Test func gatedDialRefusalsReportRouteGatedNotTimedOut() {
+        // A connect-registry gate refusal is instantaneous and never touched
+        // the network. It used to be classified as `.timedOut`, fabricating
+        // sub-30ms timeout failures that poisoned `lastFailureEvent`.
+        let gatedRefusal = DiagnosticEvent(
+            code: .transportDialFailed,
+            tNanos: 2,
+            a: DiagnosticTransportKind.iroh.rawValue,
+            b: DiagnosticFailureKind.routeGated.rawValue,
+            c: 7
+        )
+        let report = DiagnosticReport(
+            anchorWallNanos: 1_000_000_000,
+            anchorMonotonicNanos: 1,
+            events: [gatedRefusal]
+        )
+        #expect(report.lastFailureKind == .routeGated)
+        #expect(report.lastFailureKind != .timedOut)
+        #expect(report.lastFailureEvent == gatedRefusal)
     }
 
     @Test func clearStartsFreshBoundedSessionAndResetsAnchors() async {
@@ -503,5 +619,91 @@ import Testing
         #expect(report.events.first?.tNanos == 1)
         #expect(report.events.last?.tNanos == UInt64(maximum))
         #expect(!report.events.contains(where: { $0.tNanos == 99_999 || $0.tNanos == 88_888 }))
+    }
+
+    @Test func eventTapDeliversRetainedEventsInOrder() async {
+        let log = DiagnosticLog(capacity: 8)
+        let received = OSAllocatedUnfairLock<[DiagnosticEvent]>(initialState: [])
+        log.setEventTap { event in
+            received.withLock { $0.append(event) }
+        }
+
+        let first = DiagnosticEvent(code: .connect, tNanos: 1)
+        let second = DiagnosticEvent(code: .pairOk, tNanos: 2)
+        log.record(first)
+        log.record(second)
+        await waitForProcessed(log, 2)
+
+        #expect(received.withLock { $0 } == [first, second])
+    }
+
+    @Test func eventTapSkipsDedupedSelectedPathRepeats() async {
+        let log = DiagnosticLog(capacity: 8)
+        let received = OSAllocatedUnfairLock<[DiagnosticEvent]>(initialState: [])
+        log.setEventTap { event in
+            received.withLock { $0.append(event) }
+        }
+
+        let relay = DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 1,
+            a: DiagnosticPathKind.relay.rawValue
+        )
+        let repeatRelay = DiagnosticEvent(
+            code: .selectedPathChanged,
+            tNanos: 2,
+            a: DiagnosticPathKind.relay.rawValue
+        )
+        log.record(relay)
+        log.record(repeatRelay)
+        await waitForProcessed(log, 2)
+
+        #expect(received.withLock { $0 } == [relay])
+    }
+
+    @Test func eventTapNeverDeliversEventsQueuedBeforeInstallation() async {
+        // Regression: record() admits events onto the drain stream before the
+        // drain task delivers them. Installing the tap in that window must not
+        // deliver the already-admitted events: the tap floor is the ingress
+        // admission sequence, not the drain position. Recording a burst and
+        // installing the tap immediately (no drain sync) makes the pre-fix
+        // race overwhelmingly likely to deliver stale events.
+        let log = DiagnosticLog(capacity: 4096)
+        let burst = 500
+        for index in 1...burst {
+            log.record(DiagnosticEvent(code: .connect, tNanos: UInt64(index)))
+        }
+        let received = OSAllocatedUnfairLock<[DiagnosticEvent]>(initialState: [])
+        log.setEventTap { event in
+            received.withLock { $0.append(event) }
+        }
+        await waitForProcessed(log, burst)
+        #expect(received.withLock { $0.isEmpty })
+
+        // Events admitted after installation still flow.
+        let live = DiagnosticEvent(code: .pairOk, tNanos: UInt64(burst + 1))
+        log.record(live)
+        await waitForProcessed(log, burst + 1)
+        #expect(received.withLock { $0 } == [live])
+    }
+
+    @Test func eventTapDoesNotReplayHistoryAndCanBeRemoved() async {
+        let log = DiagnosticLog(capacity: 8)
+        log.record(DiagnosticEvent(code: .connect, tNanos: 1))
+        await waitForProcessed(log, 1)
+
+        let received = OSAllocatedUnfairLock<[DiagnosticEvent]>(initialState: [])
+        log.setEventTap { event in
+            received.withLock { $0.append(event) }
+        }
+        let live = DiagnosticEvent(code: .pairOk, tNanos: 2)
+        log.record(live)
+        await waitForProcessed(log, 2)
+        #expect(received.withLock { $0 } == [live])
+
+        log.setEventTap(nil)
+        log.record(DiagnosticEvent(code: .pairFail, tNanos: 3))
+        await waitForProcessed(log, 3)
+        #expect(received.withLock { $0 } == [live])
     }
 }

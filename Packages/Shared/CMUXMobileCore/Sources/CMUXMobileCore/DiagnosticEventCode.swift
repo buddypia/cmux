@@ -16,7 +16,9 @@ public enum DiagnosticEventCode: UInt16, Sendable, Codable, CaseIterable {
     case connect = 1
     /// Pairing / attach completed successfully.
     case pairOk = 2
-    /// Pairing / attach failed.
+    /// Pairing / attach failed. `a`, when present, is
+    /// ``DiagnosticTransportKind``; `b`, when present, is
+    /// ``DiagnosticFailureKind``.
     case pairFail = 3
     /// The render-grid stream lagged behind (a bounded render-lag counter tick).
     ///
@@ -135,10 +137,14 @@ public enum DiagnosticEventCode: UInt16, Sendable, Codable, CaseIterable {
     /// A relay-policy refresh failed. `b`, when present, is
     /// ``DiagnosticFailureKind``.
     case relayPolicyRefreshFailed = 39
-    /// The selected network path changed. `a` is ``DiagnosticPathKind``.
+    /// The selected network path changed. `a` is ``DiagnosticPathKind``. The
+    /// foreground control session wins over background and feature sessions.
     case selectedPathChanged = 40
-    /// An established app-transport session closed. `b`, when present, is
-    /// ``DiagnosticFailureKind``; absence means an expected closure.
+    /// An established app-transport session closed. `a`, when present, is
+    /// ``DiagnosticTransportKind``; `b`, when present, is
+    /// ``DiagnosticFailureKind``; and `c`, when present, is the positive,
+    /// process-local session ID shared with ``transportSessionLifecycle``.
+    /// Absence of `b`, or `.none`, means an expected closure.
     case sessionClosed = 41
     /// No authenticated route was usable. `b`, when present, is
     /// ``DiagnosticFailureKind``.
@@ -163,4 +169,35 @@ public enum DiagnosticEventCode: UInt16, Sendable, Codable, CaseIterable {
     /// The authenticated RPC session failed before or after readiness. `b`,
     /// when present, is ``DiagnosticFailureKind``.
     case rpcFailed = 50
+    /// An admitted transport session was established or removed from its local
+    /// pool. `a` is ``DiagnosticSessionLifecycleKind``, `b` is the local
+    /// ``CmxTransportSessionPurpose`` raw value, and `c` is a positive,
+    /// process-local session correlation ID. The event contains no peer or route
+    /// identity.
+    case transportSessionLifecycle = 51
+    /// The app's scene phase changed. `a` is ``DiagnosticAppLifecyclePhase``.
+    /// Session drops that follow a backgrounding within seconds are suspension
+    /// casualties, not network failures; this event makes that attributable.
+    case appLifecycleChanged = 52
+    /// Device reachability changed. `a` is 1 when a usable network path
+    /// exists, else 0. Correlates drops with WiFi/cellular transitions.
+    case reachabilityChanged = 53
+    /// The Iroh boundary reported why a shared QUIC connection closed. `a` is
+    /// the stable close-initiator kind (0 unknown, 1 local, 2 remote, 3 timed
+    /// out), `b` is ``DiagnosticFailureKind``, `ms` is the application error
+    /// code clamped to the nonnegative `Int32` range when parseable, and `c` is
+    /// the matching positive, process-local session correlation ID.
+    case transportCloseAttribution = 54
+    /// One Iroh path opened, closed, became selected, or reported lag. `a` is
+    /// the stable path-event kind (1 opened, 2 closed, 3 selected, 4 lagged),
+    /// `b` is ``DiagnosticPathKind`` for the affected path, and `c` is the
+    /// matching positive, process-local session correlation ID.
+    case transportPathEvent = 55
+}
+
+/// Scene phase carried by ``DiagnosticEventCode/appLifecycleChanged``.
+public enum DiagnosticAppLifecyclePhase: Int, Sendable, Codable, CaseIterable {
+    case background = 0
+    case active = 1
+    case inactive = 2
 }

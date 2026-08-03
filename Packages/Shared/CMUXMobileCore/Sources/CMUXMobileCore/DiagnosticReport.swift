@@ -256,12 +256,40 @@ public extension DiagnosticEvent {
         return c
     }
 
-    /// Redacted path class carried by ``DiagnosticEventCode/selectedPathChanged``.
+    /// Redacted path class carried by a selected-path or path-lifecycle event.
     var diagnosticPathKind: DiagnosticPathKind? {
-        guard code == .selectedPathChanged, let a else {
+        guard code == .selectedPathChanged || code == .transportPathEvent,
+              let rawValue = code == .transportPathEvent ? b : a else {
             return nil
         }
-        return DiagnosticPathKind(rawValue: a)
+        return DiagnosticPathKind(rawValue: rawValue)
+    }
+
+    /// Privacy-safe pool transition carried by
+    /// ``DiagnosticEventCode/transportSessionLifecycle``.
+    var diagnosticSessionLifecycleKind: DiagnosticSessionLifecycleKind? {
+        guard code == .transportSessionLifecycle, let a else { return nil }
+        return DiagnosticSessionLifecycleKind(rawValue: a)
+    }
+
+    /// Local owner role carried by a transport-session lifecycle event.
+    var diagnosticSessionPurpose: CmxTransportSessionPurpose? {
+        guard code == .transportSessionLifecycle,
+              let b,
+              let raw = UInt8(exactly: b) else { return nil }
+        return CmxTransportSessionPurpose(rawValue: raw)
+    }
+
+    /// Positive process-local session correlation ID. This value is not stable
+    /// across app launches or devices.
+    var diagnosticSessionID: Int? {
+        guard code == .transportSessionLifecycle
+                || code == .sessionClosed
+                || code == .transportCloseAttribution
+                || code == .transportPathEvent,
+              let c,
+              c > 0 else { return nil }
+        return c
     }
 }
 
@@ -320,6 +348,7 @@ public extension DiagnosticEventCode {
              .endpointFailed,
              .relayPolicyRefreshFailed,
              .sessionClosed,
+             .transportCloseAttribution,
              .routeUnavailable,
              .discoveryFailed,
              .admissionFailed,
