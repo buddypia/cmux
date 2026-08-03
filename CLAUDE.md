@@ -60,7 +60,7 @@ If the iPhone is unreachable at build time, the reload still completes: the sign
 
 Two commits, so the test is proven to catch the bug: commit 1 adds the failing test only, commit 2 adds the fix. This is visible in the PR Commits tab.
 
-**No CI runs on pull requests here.** `.github/workflows/ci.yml` is `workflow_dispatch` only, and `gh pr checks <n>` reports `no checks reported`. Nothing turns red for you, so you are the gate: run the suite at commit 1, confirm it fails on the assertion you expect, run it again after commit 2, and put both results in the PR body. A test that fails to *compile* is not a red test — it proves nothing about the bug. Verify against a real repro before believing a suite that passes.
+**No CI runs on pull requests here.** `.github/workflows/ci.yml` is `workflow_dispatch` only, and `gh pr checks <n>` reports `no checks reported`. Nothing turns red for you, so you are the gate, in two steps. First, the `cmux-unit` build above must succeed — that is the only *total* check available, since 8.8k tests across 653 files cannot be run locally in one pass. Then run the suites covering your change (`-only-testing:cmuxTests/<Suite>`) at commit 1 and again after commit 2, and put both results in the PR body. A test that fails to *compile* is not a red test — it proves nothing about the bug. Verify against a real repro before believing a suite that passes.
 
 ## First pass, then dogfood
 
