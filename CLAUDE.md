@@ -17,11 +17,13 @@ A tag gives the app its own name, bundle ID, socket, and derived data path, so i
 
 Other variants: `reloadp.sh` (Release), `reloads.sh` (Release as isolated "cmux STAGING"), `reload2.sh --tag <tag>` (both).
 
-Compile-only check, no launch:
+Compile-only check, no launch. Use `cmux-unit`, not `cmux`: the `cmux` scheme (and `reload.sh`) does not build `cmuxTests`, so it stays green while the test target is broken — and a test target that does not compile runs **zero** tests, in every suite, silently.
 
 ```bash
-xcodebuild -project cmux.xcodeproj -scheme cmux -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/cmux-<tag> build
+xcodebuild -project cmux.xcodeproj -scheme cmux-unit -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/cmux-<tag> build-for-testing
 ```
+
+If that fails in the Ghostty CLI helper with `cannot execute tool 'metal' due to missing Metal Toolchain`, either install the component once (`xcodebuild -downloadComponent MetalToolchain`) or prefix the command with `CMUX_SKIP_ZIG_BUILD=1`, which `scripts/build-ghostty-cli-helper.sh` supports. The skip substitutes a stub for the bundled `bin/ghostty` CLI; terminal rendering comes from GhosttyKit and is unaffected, so it is fine for tests and dogfood but not for shipping a build.
 
 Rebuild GhosttyKit.xcframework with Release optimizations:
 
@@ -56,13 +58,15 @@ If the iPhone is unreachable at build time, the reload still completes: the sign
 
 ## Regression test commits
 
-Two commits, so CI proves the test catches the bug: commit 1 adds the failing test only (CI red), commit 2 adds the fix (CI green). This is visible in the PR Commits tab.
+Two commits, so the test is proven to catch the bug: commit 1 adds the failing test only, commit 2 adds the fix. This is visible in the PR Commits tab.
+
+**No CI runs on pull requests here.** `.github/workflows/ci.yml` is `workflow_dispatch` only, and `gh pr checks <n>` reports `no checks reported`. Nothing turns red for you, so you are the gate: run the suite at commit 1, confirm it fails on the assertion you expect, run it again after commit 2, and put both results in the PR body. A test that fails to *compile* is not a red test — it proves nothing about the bug. Verify against a real repro before believing a suite that passes.
 
 ## First pass, then dogfood
 
 A first pass ends when the change is implemented, the tagged build succeeded on the pushed HEAD, focused tests ran, and the PR is open (for `web/` PRs, also the live Vercel preview URL). Then hand off to the user. Do not sit in the main conversation watching CI or running speculative review passes after that point.
 
-Do not launch a background review agent (`$autoreview`, `codex review`, `claude review`, or a judge loop) by default. Second-model review is explicit user opt-in in the current conversation; an implementation request, open PR, CI failure, closeout, or handoff is not that opt-in. Let required GitHub checks and the automatic review bots run asynchronously, then return to address only concrete check failures and actionable findings before merge.
+Do not launch a background review agent (`$autoreview`, `codex review`, `claude review`, or a judge loop) by default. Second-model review is explicit user opt-in in the current conversation; an implementation request, open PR, CI failure, closeout, or handoff is not that opt-in. Let the automatic review bots run asynchronously, then return to address only their actionable findings before merge. Do not wait on GitHub checks — none run on pull requests (see Regression test commits).
 
 The main agent owns dogfood, approval, mergeability, and every pushed fix. Merging app/runtime/UI changes requires the user's explicit approval after dogfood; if a fix changes runtime behavior mid-dogfood, rebuild the tag and re-notify, since the earlier verdict covers only the build the user tested.
 
@@ -84,6 +88,7 @@ Each of these has full detail in the skill named in parentheses.
 - **SPM package groups** (`cmux-architecture`): packages live under `Packages/{Shared,iOS,macOS}/<pkg>` and the workspace mirrors that folder shape. To move one, `git mv` the directory then `python3 scripts/check-workspace-package-groups.py --write`. Never hand-edit workspace group membership.
 - **Do not gitignore cmux-owned `Package.resolved`.** SwiftPM resolution changes must show in PR diffs; package-local lockfiles are not replaced by the root one. `python3 scripts/check-package-resolved-policy.py` fails on drift.
 - **"Feature flag" means a remote PostHog runtime flag.** Implement through `CmuxFeatureFlags` with a PostHog key, explicit unavailable fallback, registry metadata, live update behavior, and focused tests. A local override may support dogfood but must not be the production control plane.
+- **Never publish an agent state cmux has not established** (`cmux-shared-behavior`): seeing a live `claude`/`codex` process proves an agent is *present*, not that it is *idle*. Activity is self-proving, idleness is not — only a hook or the agent's own transcript can prove a turn ended. `AgentChatSessionRecord.stateProvenance` records which of the three sources set the state, and `AgentChatWorkspaceLifecycleMirror` is the only thing that decides what reaches the workspace lifecycle map; a new status writer routes through it rather than switching on the state itself. Publishing the process-observed placeholder painted `💤 Idle` across the sidebar and every tab title for a Claude Code session that was mid-turn with its hook integration off, and nothing could ever move it off.
 - **Foundation, SwiftUI, AttributeGraph, and WebKit semantics change between macOS major versions.** `URL(fileURLWithPath: "/").deletingLastPathComponent().path` returns `"/.."` on macOS 14 and 15 but `"/"` on macOS 26 (https://github.com/manaflow-ai/cmux/issues/4529); CI and maintainer machines were all on the fixed side while every reporter was on the broken side. Test on the reporter's macOS before declaring a repro disproven. AWS M4 Pro builders (`aws-m4pro-1..6`) run macOS 15.7.4.
 
 ## Shared behavior policy

@@ -7,12 +7,14 @@ description: "cmux testing rules for Swift Testing, test target compilation, tes
 
 ## Regression test commit policy
 
-A regression test for a bug fix ships as two commits so CI proves the test catches the bug:
+A regression test for a bug fix ships as two commits so the test is proven to catch the bug:
 
-1. The failing test only, no fix. CI goes red.
-2. The fix. CI goes green.
+1. The failing test only, no fix. The suite fails.
+2. The fix. The suite passes.
 
 The GitHub PR Commits tab then shows the test genuinely fails without the fix.
+
+**Run both yourself.** No CI runs on pull requests (`.github/workflows/ci.yml` is `workflow_dispatch` only), so nothing turns red on your behalf; put both results in the PR body. Confirm commit 1 fails on the assertion you expect — a test that fails to compile is not a red test.
 
 ## Test wiring
 
@@ -42,7 +44,9 @@ Swift Testing (Swift 6 / Xcode 16) is the default for every unit and integration
 
 ## Test target validation
 
-`reload.sh` builds only the `cmux` scheme, so a green reload says nothing about whether `cmuxTests`/`cmuxUITests` still compile. A moved or renamed symbol can keep the app building while breaking the test target (real case: a `write(to:atomically:)` typo and a removed `TabManager.CommandResult` surfaced only in the `tests` job). Before pushing package/refactor changes, build the `cmux-unit` scheme with `-derivedDataPath /tmp/cmux-<tag>` (plus the GlobalISel workaround flag for `cmuxApp`/`AppDelegate` churn), or let the `tests` CI job gate it.
+`reload.sh` builds only the `cmux` scheme, so a green reload says nothing about whether `cmuxTests`/`cmuxUITests` still compile. A moved or renamed symbol can keep the app building while breaking the test target (real case: a `write(to:atomically:)` typo and a removed `TabManager.CommandResult` surfaced only in the `tests` job). Build the `cmux-unit` scheme with `-derivedDataPath /tmp/cmux-<tag>` (plus the GlobalISel workaround flag for `cmuxApp`/`AppDelegate` churn) before pushing.
+
+This is not optional and has no CI fallback: the `tests` job only runs on `workflow_dispatch`. `cmuxTests` sat uncompilable across three merged PRs precisely because that fallback was assumed — two suspension suites called initializers that had gained parameters, so *every* suite in the target ran zero tests while the `cmux` scheme stayed green. When a target stops compiling, "0 tests executed" and "all tests passed" look identical in a summary; read the counts.
 
 ## Detailed references
 
