@@ -1225,6 +1225,7 @@ extension Workspace {
             .tabs(inPane: paneId)
             .compactMap { panelIdFromSurfaceId($0.id) }
         let desiredOldPanelIds = snapshot.panelIds.filter { panelSnapshotsById[$0] != nil }
+        _ = bonsplitController.setFullWidthTabMode(false, inPane: paneId)
 
         var createdPanelIds: [UUID] = []
         for oldPanelId in desiredOldPanelIds {
@@ -1260,6 +1261,10 @@ extension Workspace {
            let selectedTabId = surfaceIdFromPanelId(selectedPanelId) {
             bonsplitController.focusPane(paneId)
             bonsplitController.selectTab(selectedTabId)
+        }
+
+        if snapshot.isFullWidthTabMode == true {
+            _ = bonsplitController.setFullWidthTabMode(true, inPane: paneId)
         }
     }
 
@@ -3066,6 +3071,7 @@ final class Workspace: Identifiable, ObservableObject {
         return BonsplitConfiguration.Appearance(
             tabBarHeight: WindowChromeMetrics.bonsplitTabBarHeight,
             tabTitleFontSize: tabTitleFontSize,
+            dividerHitExpansion: PortalSplitDividerRegion.dividerHitExpansion,
             splitButtonBackdropEffect: Self.bonsplitSplitButtonBackdropEffect(),
             splitButtonTooltips: Self.currentSplitButtonTooltips(),
             enableAnimations: false,
@@ -3390,6 +3396,11 @@ final class Workspace: Identifiable, ObservableObject {
             guard let self,
                   let panelId = self.panelIdFromSurfaceId(tabId) else { return false }
             return self.toggleSplitZoom(panelId: panelId)
+        }
+        bonsplitController.onTabFullWidthToggleRequest = { [weak self] tabId, _ in
+            guard let self,
+                  let panelId = self.panelIdFromSurfaceId(tabId) else { return false }
+            return self.toggleFullWidthTabMode(panelId: panelId)
         }
 
         // Set ourselves as delegate
@@ -8241,6 +8252,7 @@ final class Workspace: Identifiable, ObservableObject {
             title: replacementPanel.displayTitle,
             icon: .some(replacementPanel.displayIcon),
             iconImageData: .some(nil),
+            iconAsset: .some(nil),
             kind: .some(SurfaceKind.terminal.rawValue),
             hasCustomTitle: false,
             isDirty: replacementPanel.isDirty,
@@ -8385,6 +8397,7 @@ final class Workspace: Identifiable, ObservableObject {
             title: resolvedTitle,
             icon: .some(replacementPanel.displayIcon),
             iconImageData: .some(nil),
+            iconAsset: .some(nil),
             kind: .some(SurfaceKind.terminal.rawValue),
             hasCustomTitle: customTitle != nil,
             isDirty: replacementPanel.isDirty,
@@ -13269,6 +13282,9 @@ extension Workspace: BonsplitDelegate {
         case .toggleZoom:
             guard let panelId = panelIdFromSurfaceId(tab.id) else { return }
             toggleSplitZoom(panelId: panelId)
+        case .toggleFullWidthTab:
+            guard let panelId = panelIdFromSurfaceId(tab.id) else { return }
+            toggleFullWidthTabMode(panelId: panelId)
         case .forkConversation,
              .forkConversationRight,
              .forkConversationLeft,

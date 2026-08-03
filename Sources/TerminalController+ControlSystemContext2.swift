@@ -168,7 +168,7 @@ extension TerminalController {
             guard workspace.toggleFullWidthTabMode(panelId: panelId) else {
                 return .fullWidthTabToggleFailed
             }
-            return finish(.fullWidthTabMode(false))
+            return finish(.fullWidthTabMode(workspace.bonsplitController.isFullWidthTabMode(inPane: paneId)))
 
         case "move_to_new_workspace", "detach_to_workspace", "detach_to_new_workspace":
             // The move-to-new-workspace family stays app-side (it re-homes
