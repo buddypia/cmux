@@ -129,17 +129,15 @@ extension TerminalSurface {
             where !key.isEmpty && !value.isEmpty {
             setManagedEnvironmentValue(key, value)
         }
-        let claudeHooksEnabled = spawnPolicy.claudeHooksEnabled
-        if !claudeHooksEnabled {
-            setManagedEnvironmentValue("CMUX_CLAUDE_HOOKS_DISABLED", "1")
-        }
-        // The codex wrapper shim is still installed (it stays on PATH so a
-        // resumed codex routes through it), but when the Codex integration is
-        // off the wrapper no-ops on this env var and injects no hooks, mirroring
-        // the Claude toggle.
-        if !spawnPolicy.codexHooksEnabled {
-            setManagedEnvironmentValue("CMUX_CODEX_HOOKS_DISABLED", "1")
-        }
+        // Every wrapper shim stays on PATH whether or not its integration is
+        // on (a resumed agent routes through it either way), so these env vars
+        // are the only thing that tells a shim to no-op. Set *and* clear: the
+        // spawn environment inherits cmux's own, so a value cmux inherited
+        // from the terminal that launched it would otherwise outlive the
+        // setting that produced it.
+        protectedStartupEnvironmentKeys.formUnion(
+            spawnPolicy.applyHookDisableFlags(to: &env)
+        )
         if let customClaudePath = spawnPolicy.customClaudePath {
             setManagedEnvironmentValue("CMUX_CUSTOM_CLAUDE_PATH", customClaudePath)
         }
@@ -147,19 +145,7 @@ extension TerminalSurface {
             spawnPolicy.subagentNotificationEnvironmentKey,
             spawnPolicy.suppressSubagentNotifications ? "1" : "0"
         )
-        if !spawnPolicy.cursorHooksEnabled {
-            setManagedEnvironmentValue("CMUX_CURSOR_HOOKS_DISABLED", "1")
-        }
-        if !spawnPolicy.geminiHooksEnabled {
-            setManagedEnvironmentValue("CMUX_GEMINI_HOOKS_DISABLED", "1")
-        }
-        if !spawnPolicy.kiroHooksEnabled {
-            setManagedEnvironmentValue("CMUX_KIRO_HOOKS_DISABLED", "1")
-        }
         setManagedEnvironmentValue("CMUX_KIRO_NOTIFICATION_LEVEL", spawnPolicy.kiroNotificationLevel)
-        if !spawnPolicy.ampHooksEnabled {
-            setManagedEnvironmentValue("CMUX_AMP_HOOKS_DISABLED", "1")
-        }
 
         if let cliBinURL = Bundle.main.resourceURL?.appendingPathComponent("bin") {
             let cliBinPath = cliBinURL.path
