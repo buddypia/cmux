@@ -72,6 +72,8 @@ extension TerminalSurfaceSpawnPolicy {
         for flag in hookDisableFlags {
             if flag.isDisabled {
                 environment[flag.key] = "1"
+            } else {
+                environment.removeValue(forKey: flag.key)
             }
             ownedKeys.insert(flag.key)
         }
