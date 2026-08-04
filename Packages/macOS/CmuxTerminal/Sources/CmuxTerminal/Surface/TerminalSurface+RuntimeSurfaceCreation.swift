@@ -150,9 +150,13 @@ extension TerminalSurface {
         if let cliBinURL = Bundle.main.resourceURL?.appendingPathComponent("bin") {
             let cliBinPath = cliBinURL.path
             let ghosttyCLIPath = cliBinURL.appendingPathComponent("ghostty").path
-            if FileManager.default.isExecutableFile(atPath: ghosttyCLIPath) {
-                setManagedEnvironmentValue("GHOSTTY_BIN", ghosttyCLIPath)
-            }
+            // Same rule: an inherited GHOSTTY_BIN points at the *launching*
+            // app bundle's binary, so the absent case has to blank it rather
+            // than leave it. Consumers guard with `-n`, so "" reads as unset.
+            setManagedEnvironmentValue(
+                "GHOSTTY_BIN",
+                FileManager.default.isExecutableFile(atPath: ghosttyCLIPath) ? ghosttyCLIPath : ""
+            )
             let currentPath = env["PATH"]
                 ?? getenv("PATH").map { String(cString: $0) }
                 ?? ProcessInfo.processInfo.environment["PATH"]
@@ -190,18 +194,30 @@ extension TerminalSurface {
         }
 
         var managedShellCommand: String?
-        if spawnPolicy.shellIntegrationEnabled,
-           let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path,
-           Self.shellIntegrationDirectoryExists(integrationDir) {
-            setManagedEnvironmentValue("CMUX_SHELL_INTEGRATION", "1")
-            setManagedEnvironmentValue("CMUX_SHELL_INTEGRATION_DIR", integrationDir)
-            Self.applyManagedGitWatchEnvironment(
-                watchGitStatusEnabled: spawnPolicy.watchGitStatusEnabled,
-                showPullRequestsEnabled: spawnPolicy.showPullRequestsEnabled,
-                to: &env,
-                protectedKeys: &protectedStartupEnvironmentKeys
-            )
-
+        let shellIntegrationDirectory: String? = {
+            guard spawnPolicy.shellIntegrationEnabled,
+                  let integrationDir = Bundle.main.resourceURL?
+                      .appendingPathComponent("shell-integration").path,
+                  Self.shellIntegrationDirectoryExists(integrationDir)
+            else { return nil }
+            return integrationDir
+        }()
+        // Both of these write in both directions, unconditionally. Skipping the
+        // write when integration is off would leave whatever cmux inherited
+        // from the terminal that launched it, which points into another app
+        // bundle and carries another window's watch policy.
+        Self.applyManagedShellIntegrationEnvironment(
+            integrationDirectory: shellIntegrationDirectory,
+            to: &env,
+            protectedKeys: &protectedStartupEnvironmentKeys
+        )
+        Self.applyManagedGitWatchEnvironment(
+            watchGitStatusEnabled: spawnPolicy.watchGitStatusEnabled,
+            showPullRequestsEnabled: spawnPolicy.showPullRequestsEnabled,
+            to: &env,
+            protectedKeys: &protectedStartupEnvironmentKeys
+        )
+        if let integrationDir = shellIntegrationDirectory {
             if let shell = engine.resolvedUserShell {
                 managedShellCommand = Self.applyManagedShellSpecificStartupEnvironment(
                     shell: shell,

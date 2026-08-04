@@ -75,6 +75,34 @@ extension TerminalSurface {
         protectedKeys.insert("CMUX_NO_PR_WATCH")
     }
 
+    /// Advertises cmux shell integration, in both directions.
+    ///
+    /// Writing only the "on" case leaks. A spawned surface's environment starts
+    /// from cmux's own, and cmux is routinely launched *from* a cmux terminal,
+    /// so a child would inherit `CMUX_SHELL_INTEGRATION=1` — plus a
+    /// `CMUX_SHELL_INTEGRATION_DIR` pointing into the *launching* app's bundle
+    /// — even when this app has integration switched off or is missing its own
+    /// bundled scripts.
+    ///
+    /// The off value is `"0"`, not `""`: every consumer reads
+    /// `"${CMUX_SHELL_INTEGRATION:-1}" != "0"` (`Resources/shell-integration/.zshenv`,
+    /// `cmux-bash-bootstrap.bash`), so an empty string still reads as on.
+    ///
+    /// - Parameter integrationDirectory: The bundled `shell-integration`
+    ///   directory to advertise, or `nil` when integration is off or its
+    ///   scripts are unreadable.
+    public static func applyManagedShellIntegrationEnvironment(
+        integrationDirectory: String?,
+        to environment: inout [String: String],
+        protectedKeys: inout Set<String>
+    ) {
+        guard let integrationDirectory else { return }
+        environment["CMUX_SHELL_INTEGRATION"] = "1"
+        protectedKeys.insert("CMUX_SHELL_INTEGRATION")
+        environment["CMUX_SHELL_INTEGRATION_DIR"] = integrationDirectory
+        protectedKeys.insert("CMUX_SHELL_INTEGRATION_DIR")
+    }
+
     /// Prepends `directory` to a `PATH`-style string exactly once.
     public static func pathByPrependingUniqueDirectory(_ directory: String, to path: String) -> String {
         let trimmedDirectory = directory.trimmingCharacters(in: .whitespacesAndNewlines)

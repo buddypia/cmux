@@ -2315,6 +2315,7 @@ C0DE71B10000000000000001 /* AppDelegate+AgentChatNotifications.swift in Sources 
 		A5001543 /* TerminalSSHSessionDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001545 /* TerminalSSHSessionDetector.swift */; };
 		D36A00090000000000000001 /* TerminalSurface+RendererRealizationSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36A00090000000000000002 /* TerminalSurface+RendererRealizationSurface.swift */; };
 		B8624CFF0000000000000042 /* TerminalSurfaceHookDisableEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8624DFF0000000000000042 /* TerminalSurfaceHookDisableEnvironmentTests.swift */; };
+		B8624CFF0000000000000043 /* TerminalSurfaceInheritedStartupEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8624DFF0000000000000043 /* TerminalSurfaceInheritedStartupEnvironmentTests.swift */; };
 		D3052001000000000000001 /* TerminalSurfaceResizePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3052001000000000000002 /* TerminalSurfaceResizePolicyTests.swift */; };
 		C750500000000000000000B1 /* TerminalSurfaceRuntimeWiring.swift in Sources */ = {isa = PBXBuildFile; fileRef = C750500000000000000000B2 /* TerminalSurfaceRuntimeWiring.swift */; };
 		A91C0D0F0000000000000002 /* TerminalTabIconRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91C0D0F0000000000000001 /* TerminalTabIconRegressionTests.swift */; };
@@ -4906,6 +4907,7 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 		A5001545 /* TerminalSSHSessionDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSSHSessionDetector.swift; sourceTree = "<group>"; };
 		D36A00090000000000000002 /* TerminalSurface+RendererRealizationSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "App/TerminalSurface+RendererRealizationSurface.swift"; sourceTree = "<group>"; };
 		B8624DFF0000000000000042 /* TerminalSurfaceHookDisableEnvironmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceHookDisableEnvironmentTests.swift; sourceTree = "<group>"; };
+		B8624DFF0000000000000043 /* TerminalSurfaceInheritedStartupEnvironmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceInheritedStartupEnvironmentTests.swift; sourceTree = "<group>"; };
 		D3052001000000000000002 /* TerminalSurfaceResizePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceResizePolicyTests.swift; sourceTree = "<group>"; };
 		C750500000000000000000B2 /* TerminalSurfaceRuntimeWiring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceRuntimeWiring.swift; sourceTree = "<group>"; };
 		A91C0D0F0000000000000001 /* TerminalTabIconRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTabIconRegressionTests.swift; sourceTree = "<group>"; };
@@ -7820,6 +7822,7 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				B8624D010000000000000001 /* SidebarHiddenPresentationTests.swift */,
 				B8624D020000000000000002 /* SidebarWorkspaceRowSuspensionTests.swift */,
 				B8624DFF0000000000000042 /* TerminalSurfaceHookDisableEnvironmentTests.swift */,
+				B8624DFF0000000000000043 /* TerminalSurfaceInheritedStartupEnvironmentTests.swift */,
 				B8624D050000000000000005 /* SidebarWorkspaceDropTargetSuspensionTests.swift */,
 				B8624D040000000000000004 /* SidebarWorkspaceRowRetirementTests.swift */,
 				B8624D030000000000000003 /* SidebarWorkspaceTableSuspensionTests.swift */,
@@ -10902,6 +10905,7 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				A11E5E1E0000000000000011 /* TerminalSelectionAccessibilityIngressGateTests.swift in Sources */,
 				A11E5E1E0000000000000003 /* TerminalSelectionAccessibilityNotifier.swift in Sources */,
 				B8624CFF0000000000000042 /* TerminalSurfaceHookDisableEnvironmentTests.swift in Sources */,
+				B8624CFF0000000000000043 /* TerminalSurfaceInheritedStartupEnvironmentTests.swift in Sources */,
 				D3052001000000000000001 /* TerminalSurfaceResizePolicyTests.swift in Sources */,
 				A91C0D0F0000000000000002 /* TerminalTabIconRegressionTests.swift in Sources */,
 				EC010C01 /* TerminalUploadCommandTests.swift in Sources */,
