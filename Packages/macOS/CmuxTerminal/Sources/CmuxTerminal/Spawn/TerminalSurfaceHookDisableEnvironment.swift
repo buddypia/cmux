@@ -16,7 +16,8 @@ public struct TerminalSurfaceHookDisableFlag: Sendable, Equatable {
     /// Environment variable the agent's wrapper shim reads.
     public let key: String
 
-    /// `true` exports `"1"`; `false` removes any inherited value.
+    /// `true` exports `"1"`; `false` exports `""`, which every wrapper reads
+    /// as "not disabled" because they all compare strictly against `"1"`.
     public let isDisabled: Bool
 
     public init(key: String, isDisabled: Bool) {
@@ -62,19 +63,22 @@ extension TerminalSurfaceSpawnPolicy {
 
     /// Applies ``hookDisableFlags`` to a spawn environment.
     ///
+    /// An enabled integration writes `""` rather than dropping the key.
+    /// Dropping it would do nothing: this dictionary is *added* to the child's
+    /// environment, which already inherits cmux's own, so a key that is merely
+    /// absent here keeps whatever value cmux inherited. Overwriting with the
+    /// empty string is how the spawn path neutralizes an inherited variable
+    /// elsewhere too (`env["CMUX_SOCKET"] = ""`).
+    ///
     /// - Returns: The keys cmux now owns. The caller marks them protected so a
     ///   restored session's saved environment cannot resurrect a flag this
-    ///   spawn just cleared — a restored surface carries the environment of
-    ///   the session that created it, which is exactly where a stale value
+    ///   spawn just neutralized — a restored surface carries the environment
+    ///   of the session that created it, which is exactly where a stale value
     ///   would come from.
     public func applyHookDisableFlags(to environment: inout [String: String]) -> Set<String> {
         var ownedKeys: Set<String> = []
         for flag in hookDisableFlags {
-            if flag.isDisabled {
-                environment[flag.key] = "1"
-            } else {
-                environment.removeValue(forKey: flag.key)
-            }
+            environment[flag.key] = flag.isDisabled ? "1" : ""
             ownedKeys.insert(flag.key)
         }
         return ownedKeys

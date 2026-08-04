@@ -49,8 +49,10 @@ struct TerminalSurfaceHookDisableEnvironmentTests {
         )
     }
 
-    /// The regression: an integration that is ON must clear the flag it
-    /// inherited, not merely decline to write one.
+    /// The regression: an integration that is ON must neutralize the flag it
+    /// inherited, not merely decline to write one. The spawn dictionary is
+    /// *added* to an environment that already inherits cmux's own, so the
+    /// enabled case has to overwrite the key, not drop it.
     @Test func enabledIntegrationsClearInheritedDisableFlags() {
         var environment = Dictionary(
             uniqueKeysWithValues: Self.allFlagKeys.map { ($0, "1") }
@@ -59,7 +61,7 @@ struct TerminalSurfaceHookDisableEnvironmentTests {
         _ = Self.policy().applyHookDisableFlags(to: &environment)
 
         for key in Self.allFlagKeys {
-            #expect(environment[key] == nil, "\(key) survived an enabled integration")
+            #expect(environment[key] == "", "\(key) survived an enabled integration")
         }
     }
 
@@ -90,8 +92,8 @@ struct TerminalSurfaceHookDisableEnvironmentTests {
         _ = Self.policy(codex: false).applyHookDisableFlags(to: &environment)
 
         #expect(environment["CMUX_CODEX_HOOKS_DISABLED"] == "1")
-        #expect(environment["CMUX_CLAUDE_HOOKS_DISABLED"] == nil)
-        #expect(environment["CMUX_CURSOR_HOOKS_DISABLED"] == nil)
+        #expect(environment["CMUX_CLAUDE_HOOKS_DISABLED"] == "")
+        #expect(environment["CMUX_CURSOR_HOOKS_DISABLED"] == "")
     }
 
     /// A restored surface is spawned with the saved environment of the session
