@@ -96,10 +96,9 @@ extension TerminalSurface {
         to environment: inout [String: String],
         protectedKeys: inout Set<String>
     ) {
-        guard let integrationDirectory else { return }
-        environment["CMUX_SHELL_INTEGRATION"] = "1"
+        environment["CMUX_SHELL_INTEGRATION"] = integrationDirectory == nil ? "0" : "1"
         protectedKeys.insert("CMUX_SHELL_INTEGRATION")
-        environment["CMUX_SHELL_INTEGRATION_DIR"] = integrationDirectory
+        environment["CMUX_SHELL_INTEGRATION_DIR"] = integrationDirectory ?? ""
         protectedKeys.insert("CMUX_SHELL_INTEGRATION_DIR")
     }
 
