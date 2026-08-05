@@ -48,6 +48,17 @@ Swift Testing (Swift 6 / Xcode 16) is the default for every unit and integration
 
 There is no CI fallback: the `tests` job only runs on `workflow_dispatch`. A target that stops compiling reports "0 tests executed", which reads like a pass — check the count.
 
+## A green suite is not a fixed bug
+
+A unit test proves the function you changed now returns what you decided it should. It cannot tell you that value reaches the runtime, so for any fix whose symptom the user can see, observe the symptom gone in a tagged build before calling it fixed.
+
+Two failures in one session, both green at the time:
+
+- A hook-disable flag was "cleared" by removing the key from the spawn environment dictionary. Every assertion passed. The spawned terminal still reported the old value, because that dictionary is *added* to an environment the child already inherits — a key that is merely absent keeps the inherited value. Only `env | grep` in a real terminal showed it (`e2b1a080a5`).
+- Before that, a sidebar status fix was verified by suite alone and shipped. The symptom it was meant to fix reproduced on the first live check, because the real cause was one lane further upstream.
+
+The check is usually one command — read the env, dump the state over the debug socket, watch the sidebar through a turn. Neutralizing an inherited variable is the specific case worth remembering: the correct value differs per key (`""` for a `-n` guard, `"0"` where the consumer reads `"${VAR:-1}" != "0"`), so read the consumer instead of copying the last fix.
+
 ## Detailed references
 
 - [references/swift-testing-migration.md](references/swift-testing-migration.md): XCTest to Swift Testing conversion mapping.
