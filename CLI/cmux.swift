@@ -34418,23 +34418,22 @@ export default CMUXSessionRestore;
         let commandEvent = optionValue(commandArgs, name: "--event")
 
         // Read stdin. Claude, Codex, and the other agents all pipe hook JSON
-        // through stdin; unknown inputs fall through to `{}`. Codex lifecycle
-        // payloads and Pi's compacted terminal batches are bounded before JSON
-        // decoding without changing other agents' actionable hook reads.
-        let stdinData: Data
-        let feedHookStdinLimit: Int? = switch source {
-        case "codex": Self.feedHookMaxStdinBytes
+        // through stdin; unknown inputs fall through to `{}`. Every agent reads
+        // through the bounded, deadlined reader rather than only the ones we
+        // have had trouble with: an agent that writes the payload but never
+        // closes the pipe would otherwise hang this hook until its configured
+        // timeout kills it, stalling every tool call in that session behind it.
+        // Pi's compacted terminal batches keep their tighter limit.
+        let feedHookStdinLimit: Int = switch source {
         case "pi": Self.piFeedHookMaxStdinBytes
-        default: nil
+        default: Self.feedHookMaxStdinBytes
         }
-        if let feedHookStdinLimit {
-            guard let boundedData = Self.readBoundedFeedHookStdin(maxBytes: feedHookStdinLimit) else {
-                print("{}")
-                return
-            }
-            stdinData = boundedData
-        } else {
-            stdinData = FileHandle.standardInput.readDataToEndOfFile()
+        guard let stdinData = Self.readBoundedFeedHookStdin(
+            maxBytes: feedHookStdinLimit,
+            idleTimeoutMilliseconds: Self.feedHookStdinIdleTimeoutMilliseconds
+        ) else {
+            print("{}")
+            return
         }
         guard !stdinData.isEmpty,
               let stdinObj = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any]
@@ -34708,24 +34707,85 @@ export default CMUXSessionRestore;
 
     private static let feedHookMaxStdinBytes = 1 * 1024 * 1024
     private static let piFeedHookMaxStdinBytes = 128 * 1024
+    /// Stop waiting for more hook payload bytes after this long.
+    ///
+    /// Agents disagree on whether they close the hook's stdin once the payload
+    /// is written; Antigravity leaves it open. Waiting on a deadline instead of
+    /// on EOF keeps the read correct whichever way the writer behaves.
+    private static let feedHookStdinIdleTimeoutMilliseconds: Int32 = 2000
 
+    private enum FeedHookStdinReadiness {
+        case readable
+        case idleOrClosed
+    }
+
+    /// Read a feed hook payload without ever blocking indefinitely.
+    ///
+    /// Returns the bytes read, or `nil` when the payload exceeds `maxBytes`.
+    /// Stops at whichever comes first: a complete JSON object, EOF, the byte
+    /// limit, or `idleTimeoutMilliseconds` elapsing with no new bytes.
     private static func readBoundedFeedHookStdin(
         maxBytes: Int,
+        idleTimeoutMilliseconds: Int32,
         handle: FileHandle = .standardInput
     ) -> Data? {
+        let fd = handle.fileDescriptor
         var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         while data.count <= maxBytes {
-            let remainingBytes = maxBytes + 1 - data.count
-            let chunkSize = min(64 * 1024, remainingBytes)
-            let chunk = (try? handle.read(upToCount: chunkSize)) ?? Data()
-            guard !chunk.isEmpty else { return data }
-            data.append(chunk)
+            switch waitForFeedHookStdin(fd: fd, timeoutMilliseconds: idleTimeoutMilliseconds) {
+            case .readable: break
+            case .idleOrClosed: return data
+            }
+            let wanted = min(buffer.count, maxBytes + 1 - data.count)
+            let readCount: Int = buffer.withUnsafeMutableBytes { raw in
+                Darwin.read(fd, raw.baseAddress, wanted)
+            }
+            if readCount < 0 {
+                if errno == EINTR { continue }
+                return data
+            }
+            guard readCount > 0 else { return data }
+            data.append(contentsOf: buffer[0..<readCount])
+            // Hook payloads are a single JSON object, so stopping as soon as one
+            // parses means we never depend on the writer closing the pipe.
+            if (try? JSONSerialization.jsonObject(with: data)) != nil { return data }
         }
-        guard data.count <= maxBytes else {
-            while !((try? handle.read(upToCount: 64 * 1024)) ?? Data()).isEmpty {}
-            return nil
+        // Over the limit: drain what the writer already queued so it does not
+        // fail mid-write, but never wait on a writer that keeps the pipe open.
+        while true {
+            switch waitForFeedHookStdin(fd: fd, timeoutMilliseconds: idleTimeoutMilliseconds) {
+            case .readable: break
+            case .idleOrClosed: return nil
+            }
+            let readCount: Int = buffer.withUnsafeMutableBytes { raw in
+                Darwin.read(fd, raw.baseAddress, raw.count)
+            }
+            if readCount < 0 {
+                if errno == EINTR { continue }
+                return nil
+            }
+            guard readCount > 0 else { return nil }
         }
-        return data
+    }
+
+    private static func waitForFeedHookStdin(
+        fd: Int32,
+        timeoutMilliseconds: Int32
+    ) -> FeedHookStdinReadiness {
+        while true {
+            var descriptor = pollfd(
+                fd: fd,
+                events: Int16(POLLIN | POLLHUP | POLLERR),
+                revents: 0
+            )
+            let ready = Darwin.poll(&descriptor, 1, timeoutMilliseconds)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                return .idleOrClosed
+            }
+            return ready == 0 ? .idleOrClosed : .readable
+        }
     }
 
     private static let feedPostToolUseScalarStringLimitBytes = 512

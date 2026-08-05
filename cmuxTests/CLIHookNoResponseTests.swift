@@ -116,6 +116,68 @@ struct CLIHookNoResponseTests {
         }
     }
 
+    /// An agent that writes the payload but never closes the hook's stdin must
+    /// not stall the hook. Antigravity behaves this way, and reading to EOF
+    /// blocked until the hook's configured timeout killed it, which stalled
+    /// every tool call in that session behind it.
+    @Test func feedHookDoesNotWaitForAgentsThatLeaveStandardInputOpen() throws {
+        let cliPath = try Self.bundledCLIPath()
+        let socketPath = Self.makeSocketPath("feed-stdin-open")
+        let listenerFD = try Self.bindUnixSocket(at: socketPath, backlog: 1)
+        let state = MockSocketServerState()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-feed-stdin-open-\(UUID().uuidString)", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            Darwin.close(listenerFD)
+            unlink(socketPath)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let server = Self.startMockServerAllowingNoResponse(
+            listenerFD: listenerFD,
+            state: state,
+            fulfillWhen: { line in
+                Self.jsonObject(line)?["method"] as? String == "feed.push"
+            }
+        ) { line in
+            guard let payload = Self.jsonObject(line),
+                  payload["method"] as? String == "feed.push" else {
+                return Self.malformedRequestResponse(raw: line)
+            }
+            return nil
+        }
+
+        let environment = [
+            "HOME": root.path,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "PWD": root.path,
+            "CMUX_SOCKET_PATH": socketPath,
+            "CMUX_WORKSPACE_ID": "33333333-3333-3333-3333-333333333333",
+            "CMUX_SURFACE_ID": "44444444-4444-4444-4444-444444444444",
+            "CMUX_CLI_SENTRY_DISABLED": "1",
+            "CMUX_ANTIGRAVITY_PID": "626262",
+        ]
+
+        let input = """
+        {"hook_event_name":"PreToolUse","session_id":"antigravity-session-123","cwd":"\(root.path)","tool_name":"Bash","tool_input":{"path":"\(root.appendingPathComponent("README.md").path)"}}
+        """
+
+        let result = Self.runProcessLeavingStandardInputOpen(
+            executablePath: cliPath,
+            arguments: ["hooks", "feed", "--source", "antigravity", "--event", "PreToolUse"],
+            environment: environment,
+            standardInput: input,
+            timeout: 10
+        )
+
+        #expect(!result.timedOut, "hook blocked on an agent that never closed stdin: \(result.stderr)")
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout == "{}\n")
+        #expect(server.wait(timeout: 5), "socket server did not observe feed.push")
+    }
+
     @Test func genericLifecycleFeedTelemetryDoesNotWaitForSocketResponse() throws {
         let cliPath = try Self.bundledCLIPath()
         let socketPath = Self.makeSocketPath("generic-lifecycle-no-response")
@@ -571,6 +633,60 @@ struct CLIHookNoResponseTests {
         } catch {
             return ProcessRunResult(status: -1, stdout: "", stderr: "\(error)", timedOut: false)
         }
+
+        let timedOut = finished.wait(timeout: .now() + timeout) != .success
+        if timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 1)
+        }
+
+        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+        return ProcessRunResult(
+            status: process.terminationStatus,
+            stdout: String(data: stdoutData, encoding: .utf8) ?? "",
+            stderr: String(data: stderrData, encoding: .utf8) ?? "",
+            timedOut: timedOut
+        )
+    }
+
+    /// Run the CLI with a stdin pipe that stays open after the payload is written.
+    ///
+    /// `runProcess` feeds stdin from a temp file, so the hook always sees EOF
+    /// straight away and never exercises the deadline path. Agents that keep the
+    /// pipe open need this variant to be covered.
+    private static func runProcessLeavingStandardInputOpen(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String],
+        standardInput: String,
+        timeout: TimeInterval
+    ) -> ProcessRunResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        process.environment = environment
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        let stdin = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = stdin
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
+        do {
+            try process.run()
+        } catch {
+            return ProcessRunResult(status: -1, stdout: "", stderr: "\(error)", timedOut: false)
+        }
+
+        // Write the payload and deliberately keep the write end open, so the
+        // hook only returns if it stops waiting on its own.
+        stdin.fileHandleForWriting.write(Data(standardInput.utf8))
+        defer { try? stdin.fileHandleForWriting.close() }
 
         let timedOut = finished.wait(timeout: .now() + timeout) != .success
         if timedOut {
