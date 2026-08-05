@@ -8,8 +8,58 @@
 # work around it.
 #
 # Exit 2 blocks the call and shows stderr to the agent, so each message says
-# what to run instead.
+# what to run instead. Any other non-zero exit is *not* blocking, which means
+# a guard that cannot start is a guard that silently stops guarding — hence
+# the `${CLAUDE_PROJECT_DIR:-.}` fallback in .claude/settings.json and the
+# self-test below (`--self-test`), which is the only thing that can tell you
+# the rules still match what they are supposed to.
 set -uo pipefail
+
+if [ "${1:-}" = "--self-test" ]; then
+    self="${BASH_SOURCE[0]}"
+    self_test_failed=0
+    check() {
+        local want="$1" cmd="$2" got
+        printf '%s' "$cmd" \
+            | python3 -c 'import json,sys;print(json.dumps({"tool_input":{"command":sys.stdin.read()}}))' \
+            | "$self" >/dev/null 2>&1
+        got=$?
+        if [ "$got" != "$want" ]; then
+            printf 'FAIL  want=%s got=%s  %s\n' "$want" "$got" "$cmd" >&2
+            self_test_failed=1
+        fi
+    }
+
+    # Blocked.
+    check 2 'xcodebuild -project cmux.xcodeproj -scheme cmux-unit build-for-testing'
+    check 2 'CMUX_SKIP_ZIG_BUILD=1 xcodebuild -scheme cmux -destination x test'
+    check 2 '/tmp/cmux-cli list-workspaces'
+    check 2 'git add -A'
+    check 2 'git add .'
+    check 2 'cd /x && git add --all'
+    check 2 'git add -u'
+    check 2 'git commit -am "wip"'
+    check 2 'git commit -a'
+
+    # Allowed. Each one is a command this repo's own docs tell you to run,
+    # or a read that only looks at a guarded path.
+    check 0 'xcodebuild -project cmux.xcodeproj -scheme cmux-unit -derivedDataPath /tmp/cmux-t build-for-testing'
+    check 0 'xcodebuild -downloadComponent MetalToolchain'
+    check 0 'xcodebuild -list'
+    check 0 './scripts/reload.sh --tag t'
+    check 0 'CMUX_TAG=t scripts/cmux-debug-cli.sh list-workspaces'
+    check 0 'ls -la /tmp/cmux-cli'
+    check 0 'git add Sources/Foo.swift cmuxTests/Bar.swift'
+    check 0 'git commit -q -m "msg"'
+    check 0 'git commit --amend'
+    check 0 'git status --short'
+
+    if [ "$self_test_failed" = 0 ]; then
+        echo "claude-bash-guard: all cases pass"
+        exit 0
+    fi
+    exit 1
+fi
 
 command_line="$(
     python3 -c '
