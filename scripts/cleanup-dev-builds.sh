@@ -67,11 +67,36 @@ done
 # Tags come from DerivedData dirs named cmux-<tag>. Authoritative because
 # reload.sh always creates one there.
 discover_tags() {
+    discover_reload_tags
+    discover_compile_only_tags
+}
+
+discover_reload_tags() {
     [[ -d "$DERIVED_DATA_ROOT" ]] || return 0
     local d name
     for d in "$DERIVED_DATA_ROOT"/cmux-*/; do
         # The glob leaves the literal pattern if no matches exist on macOS.
         [[ -d "$d" ]] || continue
+        name="${d%/}"
+        name="${name##*/}"
+        printf '%s\n' "${name#cmux-}"
+    done
+}
+
+# The compile-only check in CLAUDE.md passes -derivedDataPath /tmp/cmux-<tag>,
+# which puts DerivedData outside DERIVED_DATA_ROOT entirely. Those tags never
+# appear in reload.sh's tree, so before this they were invisible to every
+# cleanup pass and grew without bound — two such checks in one session left
+# 15.6 GB behind.
+#
+# Require Build/Products to be sure it really is DerivedData: /tmp/cmux-* also
+# holds the cmux-cli symlink, sockets, logs, and the per-surface command shims
+# of *running* sessions, none of which are this script's to delete.
+discover_compile_only_tags() {
+    local d name
+    for d in /tmp/cmux-*/; do
+        [[ -d "$d" ]] || continue
+        [[ -d "${d}Build/Products" ]] || continue
         name="${d%/}"
         name="${name##*/}"
         printf '%s\n' "${name#cmux-}"
@@ -170,6 +195,13 @@ while IFS= read -r tag; do
     fi
     if (( older_than_days > 0 )); then
         age="$(derived_data_mtime_days "$DERIVED_DATA_ROOT/cmux-${tag}")"
+        # A compile-only tag has no DerivedData under the root; its age
+        # lives on the /tmp copy. Without this the -1 ("no age signal")
+        # branch below would let --older-than delete a build from minutes
+        # ago.
+        if (( age < 0 )); then
+            age="$(derived_data_mtime_days "/tmp/cmux-${tag}")"
+        fi
         # age == -1 means the DerivedData dir is gone (e.g., manually
         # deleted while orphan sockets/logs remain). Treat as "no age
         # signal, age filter does not apply" so the residue still gets
@@ -191,7 +223,7 @@ while IFS= read -r tag; do
         IFS=, ; reason_str="${reasons[*]}" ; IFS=$' \t\n'
         plan_skip+=("$tag|$tag_bytes|$reason_str")
     fi
-done < <(discover_tags | sort)
+done < <(discover_tags | sort -u)
 
 # ---- output -----------------------------------------------------------------
 
