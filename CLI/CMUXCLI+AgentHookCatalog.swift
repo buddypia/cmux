@@ -142,7 +142,8 @@ extension CMUXCLI {
                 .init(agentEvent: "SessionEnd", cmuxSubcommand: "session-end"),
             ],
             aliases: ["agy"],
-            sessionEndIsTurnBoundary: true
+            sessionEndIsTurnBoundary: true,
+            promptSubmitRepeatsWithinTurn: true
         ),
         AgentHookDef(
             name: "rovodev", displayName: "Rovo Dev", statusKey: "rovodev",
@@ -173,6 +174,7 @@ extension CMUXCLI {
                 .init(agentEvent: "on_session_reset", cmuxSubcommand: "session-start"),
             ],
             sessionEndIsTurnBoundary: true,
+            promptSubmitRepeatsWithinTurn: true,
             feedHookEvents: ["pre_tool_call", "post_tool_call", "pre_approval_request", "post_approval_response"]
         ),
         AgentHookDef(

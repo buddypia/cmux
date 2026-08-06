@@ -392,7 +392,8 @@ final class ClaudeHookSessionStore {
         runtimeStatus: AgentHookRuntimeStatus? = nil,
         updateRuntimeStatus: Bool = false,
         autoNameMessages: [AutoNamingTranscriptMessage] = [],
-        rejectTerminalTurn: Bool = false
+        rejectTerminalTurn: Bool = false,
+        repeatsWithinTurn: Bool = false
     ) throws -> (staleTerminalTurn: Bool, nested: Bool) {
         let normalized = normalizeSessionId(sessionId)
         guard !normalized.isEmpty else { return (staleTerminalTurn: false, nested: false) }
@@ -476,6 +477,17 @@ final class ClaudeHookSessionStore {
                 state.sessions[normalized] = record
                 return (staleTerminalTurn: false, nested: totalDepth > 1)
             }
+            if repeatsWithinTurn {
+                // This agent re-fires its prompt hook for every model call in one
+                // turn and supplies no turn id, so a repeat is the same turn
+                // reporting again, not a nested prompt. Pin the depth at one open
+                // turn — anything deeper never unwinds, and `recordPromptStop`
+                // holds the session `.running` until it does. Assigning rather
+                // than incrementing also drains a record that already stacked.
+                record.activePromptDepth = 1
+                state.sessions[normalized] = record
+                return (staleTerminalTurn: false, nested: false)
+            }
             let existingTurnStackDepth = activePromptTurnStack(from: record).count
             record.activePromptDepth = max(max(0, record.activePromptDepth ?? 0), existingTurnStackDepth) + 1
             state.sessions[normalized] = record
@@ -501,7 +513,8 @@ final class ClaudeHookSessionStore {
         updateLastNotificationStatus: Bool = false,
         runtimeStatus: AgentHookRuntimeStatus? = nil,
         updateRuntimeStatus: Bool = false,
-        autoNameMessages: [AutoNamingTranscriptMessage] = []
+        autoNameMessages: [AutoNamingTranscriptMessage] = [],
+        repeatsWithinTurn: Bool = false
     ) throws -> Bool {
         let normalized = normalizeSessionId(sessionId)
         guard !normalized.isEmpty else { return false }
@@ -515,7 +528,11 @@ final class ClaudeHookSessionStore {
                 now: now
             )
             let depthBeforeStop = max(0, record.activePromptDepth ?? 0)
-            let depthAfterStop = max(0, depthBeforeStop - 1)
+            // One stop ends the whole turn for an agent whose prompt hook repeats
+            // within it: there is no second stop coming to unwind a second level,
+            // and a record left deep keeps reporting `.running` forever. Unwinding
+            // to zero here also drains a record that stacked before this shipped.
+            let depthAfterStop = repeatsWithinTurn ? 0 : max(0, depthBeforeStop - 1)
             update(
                 &record,
                 workspaceId: workspaceId,
@@ -628,7 +645,10 @@ final class ClaudeHookSessionStore {
                 }
             }
             state.sessions[normalized] = record
-            return depthBeforeStop > 1
+            // Never "nested" for a repeating prompt hook: the caller suppresses the
+            // visible idle mutation for a nested stop, which is how the stale depth
+            // kept the tab's Working marker even when the store did move on.
+            return repeatsWithinTurn ? false : depthBeforeStop > 1
         }
     }
 
@@ -31457,7 +31477,8 @@ export default CMUXSessionRestore;
                             client: client,
                             workspaceId: workspaceId
                         ),
-                        rejectTerminalTurn: def.name == "codex"
+                        rejectTerminalTurn: def.name == "codex",
+                        repeatsWithinTurn: def.promptSubmitRepeatsWithinTurn
                     )) ?? (staleTerminalTurn: false, nested: false)
                     if recordResult.staleTerminalTurn {
                         stopStaleCodexPromptSubmit()
@@ -31486,8 +31507,13 @@ export default CMUXSessionRestore;
                     workspaceId: workspaceId,
                     surfaceId: surfaceId,
                     env: env,
+                    // A prompt hook that repeats within a turn carries no turn id to
+                    // match, and its repeats are mid-turn model calls: keep the
+                    // baseline the turn opened with, or `--last-turn` would shrink
+                    // to "since the agent's most recent model call".
                     preserveExistingTurnBaseline: activePromptDepth > 0 &&
-                        (normalizedHookValue(input.turnId).map { $0 == activePromptTurnId } ?? false)
+                        (def.promptSubmitRepeatsWithinTurn ||
+                            (normalizedHookValue(input.turnId).map { $0 == activePromptTurnId } ?? false))
                 )
             }
             if incomingCodexTurnIsTerminal || codexPromptTurnWentTerminal() {
@@ -31786,7 +31812,8 @@ export default CMUXSessionRestore;
                         parsedInput: input,
                         client: client,
                         workspaceId: workspaceId
-                    )
+                    ),
+                    repeatsWithinTurn: def.promptSubmitRepeatsWithinTurn
                 )) ?? false
             } else {
                 nestedPromptStop = false
@@ -32223,7 +32250,8 @@ export default CMUXSessionRestore;
                             parsedInput: input,
                             client: client,
                             workspaceId: workspaceId
-                        )
+                        ),
+                        repeatsWithinTurn: def.promptSubmitRepeatsWithinTurn
                     )
                 } else {
                     _ = try? store.upsert(
@@ -32377,7 +32405,8 @@ export default CMUXSessionRestore;
                             parsedInput: input,
                             client: client,
                             workspaceId: mapped.workspaceId
-                        )
+                        ),
+                        repeatsWithinTurn: def.promptSubmitRepeatsWithinTurn
                     )
                 }
 #if DEBUG

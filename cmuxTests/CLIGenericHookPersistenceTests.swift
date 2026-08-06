@@ -3661,4 +3661,128 @@ extension CLINotifyProcessIntegrationRegressionTests {
             )
         }
     }
+
+    /// Antigravity's `PreInvocation` hook fires once per model call inside a
+    /// single turn, while its `Stop` fires once at the end of that turn. Each
+    /// unmatched `prompt-submit` used to push `activePromptDepth` one deeper, so
+    /// `Stop` only unwound one level: it kept the session `running`, reported the
+    /// turn as a nested one, and suppressed the visible `idle` mutation. A real
+    /// store had 112 of 121 antigravity sessions pinned to `running` that way
+    /// (deepest: 447), and their surface tabs kept the `⚡` Working marker forever
+    /// after the turn ended.
+    func testAntigravityRepeatedPreInvocationsStillEndTheTurnAtStop() throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = makeSocketPath("antigravity-prompt-depth")
+        let listenerFD = try bindUnixSocket(at: socketPath)
+        let state = MockSocketServerState()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-antigravity-prompt-depth-\(UUID().uuidString)", isDirectory: true)
+        let workspaceId = "11111111-1111-1111-1111-111111111111"
+        let surfaceId = "22222222-2222-2222-2222-222222222222"
+        let sessionId = "antigravity-depth-session"
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            Darwin.close(listenerFD)
+            unlink(socketPath)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let environment: [String: String] = [
+            "HOME": root.path,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "PWD": root.path,
+            "CMUX_SOCKET_PATH": socketPath,
+            "CMUX_WORKSPACE_ID": workspaceId,
+            "CMUX_SURFACE_ID": surfaceId,
+            "CMUX_AGENT_HOOK_STATE_DIR": root.path,
+            "CMUX_CLI_SENTRY_DISABLED": "1",
+            // Pin the production default rather than inheriting the test host's
+            // defaults: nested prompts only suppress visible mutations when
+            // subagent-notification suppression is on.
+            "CMUX_SUPPRESS_SUBAGENT_NOTIFICATIONS": "1",
+        ]
+
+        // One accept slot per hook connection, not a large pool: every slot is a
+        // blocking `accept()` on a global queue, and oversubscribing them starves
+        // libdispatch's thread pool badly enough to stall the hooks under test.
+        startDetachedMockServer(listenerFD: listenerFD, state: state, connectionCount: 16) { line in
+            guard let payload = self.jsonObject(line) else {
+                return "OK"
+            }
+            guard let id = payload["id"] as? String, let method = payload["method"] as? String else {
+                return self.malformedRequestResponse(id: payload["id"] as? String, raw: line)
+            }
+            switch method {
+            case "surface.list":
+                return self.surfaceListResponse(id: id, surfaceId: surfaceId)
+            case "feed.push":
+                return self.v2Response(id: id, ok: true, result: [:])
+            default:
+                return self.v2Response(id: id, ok: false, error: ["code": "unrecognized_method", "message": "unexpected method: \(method)"])
+            }
+        }
+
+        func runAntigravityHook(_ subcommand: String, input: String) -> ProcessRunResult {
+            runProcess(
+                executablePath: cliPath,
+                arguments: ["hooks", "antigravity", subcommand],
+                environment: environment,
+                standardInput: input,
+                timeout: 20
+            )
+        }
+
+        let start = runAntigravityHook(
+            "session-start",
+            input: #"{"session_id":"\#(sessionId)","cwd":"\#(root.path)","hook_event_name":"SessionStart"}"#
+        )
+        XCTAssertFalse(start.timedOut, start.stderr)
+        XCTAssertEqual(start.status, 0, start.stderr)
+
+        // One turn, three model calls: Antigravity re-fires PreInvocation for each.
+        for _ in 0..<3 {
+            let preInvocation = runAntigravityHook(
+                "prompt-submit",
+                input: #"{"session_id":"\#(sessionId)","cwd":"\#(root.path)","hook_event_name":"PreInvocation"}"#
+            )
+            XCTAssertFalse(preInvocation.timedOut, preInvocation.stderr)
+            XCTAssertEqual(preInvocation.status, 0, preInvocation.stderr)
+        }
+
+        let stopCommandStart = state.commands.count
+        let stop = runAntigravityHook(
+            "stop",
+            input: #"{"session_id":"\#(sessionId)","cwd":"\#(root.path)","hook_event_name":"Stop","last_assistant_message":"Done","fullyIdle":true}"#
+        )
+        XCTAssertFalse(stop.timedOut, stop.stderr)
+        XCTAssertEqual(stop.status, 0, stop.stderr)
+
+        let stopCommands = Array(state.commands.dropFirst(stopCommandStart))
+        XCTAssertTrue(
+            stopCommands.contains { $0.contains("set_agent_lifecycle antigravity idle") },
+            "One Stop must end the turn no matter how many PreInvocation hooks preceded it, saw \(stopCommands)"
+        )
+        XCTAssertFalse(
+            stopCommands.contains { $0.contains("set_agent_lifecycle antigravity running") },
+            "Stop must not leave the surface marked Working, saw \(stopCommands)"
+        )
+
+        let storeURL = root.appendingPathComponent("antigravity-hook-sessions.json", isDirectory: false)
+        let storeJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: storeURL)) as? [String: Any]
+        )
+        let sessions = try XCTUnwrap(storeJSON["sessions"] as? [String: Any])
+        let persisted = try XCTUnwrap(sessions[sessionId] as? [String: Any])
+        XCTAssertEqual(
+            persisted["agentLifecycle"] as? String,
+            "idle",
+            "Stop must record the session idle, saw \(persisted)"
+        )
+        XCTAssertEqual(
+            (persisted["activePromptDepth"] as? Int) ?? 0,
+            0,
+            "Repeated PreInvocation hooks must not stack prompt depth, saw \(persisted)"
+        )
+    }
 }
