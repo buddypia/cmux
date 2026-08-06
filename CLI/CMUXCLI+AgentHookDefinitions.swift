@@ -44,6 +44,22 @@ extension CMUXCLI {
         /// separate `session-finalize` subcommand / ``AgentHookAction/sessionFinalize``
         /// action, which performs the destructive cleanup this flag suppresses.
         let sessionEndIsTurnBoundary: Bool
+        /// Whether this agent's prompt-start hook fires once per model call
+        /// rather than once per conversation turn.
+        ///
+        /// Antigravity's `PreInvocation` and hermes-agent's `pre_llm_call` fire
+        /// again for every model call inside a single turn, while their turn-end
+        /// hook fires once. Counting each repeat as a nested prompt makes
+        /// `activePromptDepth` grow without bound, and since `recordPromptStop`
+        /// keeps a session `.running` (and its stop "nested", which suppresses
+        /// the visible mutation) until that depth returns to zero, the surface
+        /// tab keeps its `⚡` Working marker forever after the turn ends.
+        ///
+        /// These agents also supply no turn id, so there is nothing to pair a
+        /// repeat against: cmux cannot tell a genuinely nested prompt from the
+        /// same turn reporting again. The honest reading is the second one — the
+        /// depth stays at one and the next stop ends the turn.
+        let promptSubmitRepeatsWithinTurn: Bool
         /// Events that install a `cmux hooks feed --source <name>` bridge.
         let feedHookEvents: [String]
         let postInstallAction: PostInstallAction?
@@ -111,6 +127,7 @@ extension CMUXCLI {
              aliases: Set<String> = [],
              publishesStopNotification: Bool = true,
              sessionEndIsTurnBoundary: Bool = false,
+             promptSubmitRepeatsWithinTurn: Bool = false,
              feedHookEvents: [String] = [],
              postInstallAction: PostInstallAction? = nil,
              postInstallNote: String? = nil) {
@@ -125,6 +142,7 @@ extension CMUXCLI {
             self.hookMarker = hookMarker; self.format = format; self.events = events
             self.publishesStopNotification = publishesStopNotification
             self.sessionEndIsTurnBoundary = sessionEndIsTurnBoundary
+            self.promptSubmitRepeatsWithinTurn = promptSubmitRepeatsWithinTurn
             self.aliases = Set(aliases.compactMap { alias in
                 let normalized = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 return normalized.isEmpty ? nil : normalized
