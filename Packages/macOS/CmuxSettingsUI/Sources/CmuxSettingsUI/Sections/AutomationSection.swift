@@ -23,6 +23,13 @@ public struct AutomationSection: View {
     @State private var geminiModel: DefaultsValueModel<Bool>
     @State private var kiroModel: DefaultsValueModel<Bool>
     @State private var kiroLevelModel: DefaultsValueModel<String>
+    @State private var pilotModeModel: DefaultsValueModel<Bool>
+    @State private var pilotModeRunModeModel: DefaultsValueModel<String>
+    @State private var pilotModeInstructionsModel: DefaultsValueModel<String>
+    @State private var pilotModePermissionsModel: DefaultsValueModel<Bool>
+    @State private var pilotModeQuestionsModel: DefaultsValueModel<Bool>
+    @State private var pilotModeReadOnlyModel: DefaultsValueModel<Bool>
+    @State private var pilotModeDenyPatternsModel: DefaultsValueModel<String>
     @State private var portBaseModel: DefaultsValueModel<Int>
     @State private var portRangeModel: DefaultsValueModel<Int>
     @State private var socketPasswordDraft: String = ""
@@ -72,6 +79,13 @@ public struct AutomationSection: View {
         _geminiModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.integrations.geminiHooksEnabled))
         _kiroModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.integrations.kiroHooksEnabled))
         _kiroLevelModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.integrations.kiroNotificationLevel))
+        _pilotModeModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotMode))
+        _pilotModeRunModeModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeRunMode))
+        _pilotModeInstructionsModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeInstructions))
+        _pilotModePermissionsModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeAnswersPermissionRequests))
+        _pilotModeQuestionsModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeAnswersQuestions))
+        _pilotModeReadOnlyModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeAutoAllowReadOnly))
+        _pilotModeDenyPatternsModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.pilotModeDenyPatterns))
         _portBaseModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.portBase))
         _portRangeModel = State(initialValue: DefaultsValueModel(store: defaultsStore, key: catalog.automation.portRange))
     }
@@ -87,6 +101,7 @@ public struct AutomationSection: View {
             codexCard
             claudePathCard
             autoNamingCard
+            pilotModeCard
             ripgrepPathCard
             suppressSubagentCard
             ampCard
@@ -124,7 +139,7 @@ public struct AutomationSection: View {
                 localized: "settings.automation.openAccess.dialog.message",
                 defaultValue: "This disables ancestry and password checks and opens the socket to all local users. Only enable when you understand the risk."
             ))
-        }.task { startSettingsObservation([socketPasswordModel, modeModel, claudeCodeModel, codexModel, claudePathModel, autoNamingModel, autoNamingAgentModel, autoNamingStatusModel, ripgrepPathModel, suppressSubagentModel, ampModel, cursorModel, geminiModel, kiroModel, kiroLevelModel, portBaseModel, portRangeModel]) }
+        }.task { startSettingsObservation([socketPasswordModel, modeModel, claudeCodeModel, codexModel, claudePathModel, autoNamingModel, autoNamingAgentModel, autoNamingStatusModel, pilotModeModel, pilotModeRunModeModel, pilotModeInstructionsModel, pilotModePermissionsModel, pilotModeQuestionsModel, pilotModeReadOnlyModel, pilotModeDenyPatternsModel, ripgrepPathModel, suppressSubagentModel, ampModel, cursorModel, geminiModel, kiroModel, kiroLevelModel, portBaseModel, portRangeModel]) }
     }
 
     @ViewBuilder
@@ -336,6 +351,181 @@ public struct AutomationSection: View {
                 autoNamingFootnote(AutoNamingAgentDisplay.statusMessage(status))
             }
         }
+    }
+
+    @ViewBuilder
+    private var pilotModeCard: some View {
+        SettingsCard {
+            SettingsCardRow(
+                configurationReview: .json("automation.pilotMode.enabled"),
+                String(localized: "settings.automation.pilotMode", defaultValue: "Pilot Mode"),
+                subtitle: pilotModeSubtitle
+            ) {
+                Toggle("", isOn: Binding(get: { pilotModeModel.current }, set: { pilotModeModel.set($0) }))
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("SettingsPilotModeToggle")
+            }
+            if pilotModeModel.current {
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.runMode"),
+                    String(localized: "settings.automation.pilotMode.runMode", defaultValue: "Mode"),
+                    subtitle: pilotModeRunModeModel.current == "active"
+                        ? String(
+                            localized: "settings.automation.pilotMode.runMode.active.subtitle",
+                            defaultValue: "Answers on your behalf. You can still answer first."
+                        )
+                        : String(
+                            localized: "settings.automation.pilotMode.runMode.shadow.subtitle",
+                            defaultValue: "Only records what it would have answered. Nothing is sent."
+                        ),
+                    controlWidth: Self.columnWidth
+                ) {
+                    Picker("", selection: Binding(
+                        get: { pilotModeRunModeModel.current },
+                        set: { pilotModeRunModeModel.set($0) }
+                    )) {
+                        Text(String(
+                            localized: "settings.automation.pilotMode.runMode.shadow",
+                            defaultValue: "Shadow (record only)"
+                        )).tag("shadow")
+                        Text(String(
+                            localized: "settings.automation.pilotMode.runMode.active",
+                            defaultValue: "Active (answer for me)"
+                        )).tag("active")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("SettingsPilotModeRunModePicker")
+                }
+
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.instructions"),
+                    String(localized: "settings.automation.pilotMode.instructions", defaultValue: "Instructions"),
+                    subtitle: String(
+                        localized: "settings.automation.pilotMode.instructions.subtitle",
+                        defaultValue: "Standing policy passed to the reviewer with every request."
+                    ),
+                    controlWidth: Self.columnWidth
+                ) {
+                    TextEditor(text: Binding(
+                        get: { pilotModeInstructionsModel.current },
+                        set: { pilotModeInstructionsModel.set($0) }
+                    ))
+                    .cmuxFont(.body)
+                    .frame(height: 88)
+                    .accessibilityIdentifier("SettingsPilotModeInstructionsField")
+                }
+
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.answerPermissionRequests"),
+                    String(
+                        localized: "settings.automation.pilotMode.answerPermissionRequests",
+                        defaultValue: "Answer Permission Requests"
+                    )
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { pilotModePermissionsModel.current },
+                        set: { pilotModePermissionsModel.set($0) }
+                    ))
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("SettingsPilotModePermissionsToggle")
+                }
+
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.answerQuestions"),
+                    String(
+                        localized: "settings.automation.pilotMode.answerQuestions",
+                        defaultValue: "Answer Questions"
+                    )
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { pilotModeQuestionsModel.current },
+                        set: { pilotModeQuestionsModel.set($0) }
+                    ))
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("SettingsPilotModeQuestionsToggle")
+                }
+
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.autoAllowReadOnly"),
+                    String(
+                        localized: "settings.automation.pilotMode.autoAllowReadOnly",
+                        defaultValue: "Approve Read-Only Calls Instantly"
+                    ),
+                    subtitle: String(
+                        localized: "settings.automation.pilotMode.autoAllowReadOnly.subtitle",
+                        defaultValue: "Skips the reviewer for reads and searches. Turn off to apply your instructions to them too."
+                    )
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { pilotModeReadOnlyModel.current },
+                        set: { pilotModeReadOnlyModel.set($0) }
+                    ))
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("SettingsPilotModeReadOnlyToggle")
+                }
+
+                SettingsCardDivider()
+                SettingsCardRow(
+                    configurationReview: .json("automation.pilotMode.denyPatterns"),
+                    String(
+                        localized: "settings.automation.pilotMode.denyPatterns",
+                        defaultValue: "Always Ask Me About"
+                    ),
+                    subtitle: String(
+                        localized: "settings.automation.pilotMode.denyPatterns.subtitle",
+                        defaultValue: "One substring per line. Matching requests always come back to you."
+                    ),
+                    controlWidth: Self.columnWidth
+                ) {
+                    TextEditor(text: Binding(
+                        get: { pilotModeDenyPatternsModel.current },
+                        set: { pilotModeDenyPatternsModel.set($0) }
+                    ))
+                    .cmuxFont(.body)
+                    .frame(height: 66)
+                    .accessibilityIdentifier("SettingsPilotModeDenyPatternsField")
+                }
+            }
+            SettingsCardDivider()
+            SettingsCardNote(String(
+                localized: "settings.automation.pilotMode.note",
+                defaultValue: "Pilot Mode reviews an agent's pending permission requests and questions and can answer them for you, using your own agent CLI to decide. Irreversible, outward-facing, and credential-related actions are always handed back to you, whatever your instructions say, and plan approvals are never automated. Every verdict is logged to ~/.cmuxterm/pilot-mode.jsonl."
+            ))
+            if pilotModeModel.current, pilotModeRunModeModel.current == "active" {
+                autoNamingFootnote(String(
+                    localized: "settings.automation.pilotMode.activeWarning",
+                    defaultValue: "Active mode answers without you. Run in Shadow first and check the log to see how it would have decided."
+                ))
+            }
+        }
+    }
+
+    private var pilotModeSubtitle: String {
+        guard pilotModeModel.current else {
+            return String(
+                localized: "settings.automation.pilotMode.subtitleOff",
+                defaultValue: "You answer every permission request and question."
+            )
+        }
+        return pilotModeRunModeModel.current == "active"
+            ? String(
+                localized: "settings.automation.pilotMode.subtitleActive",
+                defaultValue: "cmux answers routine requests for you."
+            )
+            : String(
+                localized: "settings.automation.pilotMode.subtitleShadow",
+                defaultValue: "Recording verdicts only; you still answer."
+            )
     }
 
     @ViewBuilder

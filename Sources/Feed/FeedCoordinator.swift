@@ -334,6 +334,16 @@ final class FeedCoordinator: @unchecked Sendable {
         // buttons so the user can respond without switching windows.
         postNotificationIfStillAwaiting(event: accepted.event, requestId: requestId)
 
+        // Pilot Mode evaluates alongside the human. It returns immediately and
+        // answers asynchronously, and it can only claim a waiter the user has
+        // not already filled, so the card stays live and the user always wins a
+        // race. In shadow mode it records a verdict and delivers nothing.
+        PilotModeController.shared.consider(
+            event: accepted.event,
+            requestId: requestId,
+            itemId: accepted.itemId
+        )
+
         let remainingDecisionTimeout = Self.remainingIngressTime(until: deliveryDeadline)
         let deadline: DispatchTime = .now() + max(remainingDecisionTimeout, 0)
         let waitResult = semaphore.wait(timeout: deadline)
@@ -449,8 +459,25 @@ final class FeedCoordinator: @unchecked Sendable {
 
     /// Called by the `feed.*.reply` handlers. Marks the corresponding
     /// item resolved on the main-actor store and wakes any waiter.
-    func deliverReply(requestId: String, decision: WorkstreamDecision) {
+    ///
+    /// `onlyIfAwaiting` is Pilot Mode's guarantee that an automatic decision can
+    /// never overwrite a human one. A user reply and a Pilot Mode verdict race
+    /// by construction — the judge runs while the Feed card is on screen — so
+    /// the automatic path claims the waiter under the same lock that the human
+    /// path uses, and gives up if the slot is already taken.
+    @discardableResult
+    func deliverReply(
+        requestId: String,
+        decision: WorkstreamDecision,
+        onlyIfAwaiting: Bool = false
+    ) -> Bool {
         waiterLock.lock()
+        if onlyIfAwaiting {
+            guard let waiter = waiters[requestId], waiter.decision == nil else {
+                waiterLock.unlock()
+                return false
+            }
+        }
         let attentionTarget = waiters[requestId]?.attentionTarget
         if let waiter = waiters[requestId] {
             waiter.decision = decision
@@ -462,6 +489,15 @@ final class FeedCoordinator: @unchecked Sendable {
         // running/idle state shows through (refcounted so an overlapping
         // decision on the same panel keeps it lit until it too concludes).
         concludeAttentionOnMain(attentionTarget)
+
+        // A human answer restores Pilot Mode's consecutive-decision budget on
+        // that surface: a person is back in the loop, which is the whole point
+        // of the ceiling.
+        if !onlyIfAwaiting {
+            PilotModeController.shared.recordHumanDecision(
+                surfaceId: attentionTarget?.workspaceId == nil ? nil : attentionTarget?.surfaceId
+            )
+        }
 
         let resolve: @Sendable () -> Void = { [requestId, decision] in
             MainActor.assumeIsolated {
@@ -479,6 +515,7 @@ final class FeedCoordinator: @unchecked Sendable {
         }
 
         cancelNotification(requestId: requestId)
+        return true
     }
 
     fileprivate func isAwaitingDecision(requestId: String) -> Bool {

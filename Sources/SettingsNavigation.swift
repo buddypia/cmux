@@ -439,6 +439,19 @@ enum SettingsSearchIndex {
                 String(localized: "settings.automation.autoNamingAgent.auto", defaultValue: "Automatic")
             ].joined(separator: " ")
         ),
+        setting(
+            .automation,
+            "pilot-mode",
+            String(localized: "settings.automation.pilotMode", defaultValue: "Pilot Mode"),
+            [
+                "automation.pilotMode pilot mode auto approve autoapprove automatic approval answer permission requests questions unattended delegate agent decisions shadow active guardrails instructions",
+                String(localized: "settings.automation.pilotMode.subtitleOff", defaultValue: "You answer every permission request and question."),
+                String(localized: "settings.automation.pilotMode.subtitleActive", defaultValue: "cmux answers routine requests for you."),
+                String(localized: "settings.automation.pilotMode.runMode", defaultValue: "Mode"),
+                String(localized: "settings.automation.pilotMode.instructions", defaultValue: "Instructions"),
+                String(localized: "settings.automation.pilotMode.denyPatterns", defaultValue: "Always Ask Me About")
+            ].joined(separator: " ")
+        ),
         setting(.automation, "ripgrep-path", String(localized: "settings.automation.ripgrep.customPath", defaultValue: "Ripgrep Binary Path"), "custom ripgrep rg executable find search nix"),
         setting(.automation, "subagent-notifications", String(localized: "settings.automation.suppressSubagentNotifications", defaultValue: "Suppress Subagent Notifications"), "nested child agent codex claude hooks notifications"),
         setting(.automation, "cursor", String(localized: "settings.automation.cursor", defaultValue: "Cursor Integration"), "agent hooks notifications"),
@@ -577,6 +590,15 @@ enum SettingsSearchIndex {
         "automation.claudeCodeIntegration": settingID(for: .automation, idSuffix: "claude-code"),
         "automation.claudeBinaryPath": settingID(for: .automation, idSuffix: "claude-path"),
         "automation.workspaceAutoNaming": settingID(for: .automation, idSuffix: "workspace-auto-naming"),
+        "automation.pilotMode.enabled": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.runMode": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.instructions": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.answerPermissionRequests": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.answerQuestions": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.autoAllowReadOnly": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.denyPatterns": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.maxConsecutiveDecisions": settingID(for: .automation, idSuffix: "pilot-mode"),
+        "automation.pilotMode.judgeTimeoutSeconds": settingID(for: .automation, idSuffix: "pilot-mode"),
         "automation.ripgrepBinaryPath": settingID(for: .automation, idSuffix: "ripgrep-path"),
         "automation.suppressSubagentNotifications": settingID(for: .automation, idSuffix: "subagent-notifications"),
         "automation.cursorIntegration": settingID(for: .automation, idSuffix: "cursor"),

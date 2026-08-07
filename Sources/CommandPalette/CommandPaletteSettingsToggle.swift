@@ -783,6 +783,30 @@ enum CommandPaletteSettingsToggleCommands {
                 defaultsKey: IntegrationsCatalogSection().suppressSubagentNotifications.userDefaultsKey
             ),
             CommandPaletteSettingToggleDescriptor(
+                commandId: commandIdPrefix + "pilotMode",
+                settingsKey: "automation.pilotMode.enabled",
+                title: {
+                    String(localized: "settings.automation.pilotMode", defaultValue: "Pilot Mode")
+                },
+                sectionTitle: automation,
+                keywords: [
+                    "automation.pilotMode.enabled",
+                    "pilot",
+                    "mode",
+                    "autopilot",
+                    "auto",
+                    "approve",
+                    "approval",
+                    "answer",
+                    "permission",
+                    "questions",
+                    "unattended",
+                    "shadow",
+                ],
+                defaultValue: AutomationCatalogSection().pilotMode.defaultValue,
+                defaultsKey: AutomationCatalogSection().pilotMode.userDefaultsKey
+            ),
+            CommandPaletteSettingToggleDescriptor(
                 commandId: commandIdPrefix + "cursorIntegration",
                 settingsKey: "automation.cursorIntegration",
                 title: {
