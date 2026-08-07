@@ -15,7 +15,7 @@ It is off by default, and when first enabled it runs in **shadow mode**: it eval
 }
 ```
 
-Turn it on from **Settings > Automation > Pilot Mode**, or per tab from the command palette (**Toggle Pilot Mode for This Tab**).
+Turn it on from **Settings > Automation > Pilot Mode**, from the command palette (**Pilot Mode**), or in `~/.config/cmux/cmux.json`.
 
 ## What it answers
 
@@ -105,7 +105,9 @@ Run in shadow until that distribution looks right, then switch `runMode` to `act
 
 ## Scope
 
-The stored setting is the default for every surface, and any tab can override it. cmux runs many agents side by side, and a scratch tab and a release tab do not deserve the same delegation policy. Per-tab overrides are in-memory only: on restart every surface returns to the stored default.
+The stored setting is the default for every surface, and the resolver supports per-tab overrides on top of it — cmux runs many agents side by side, and a scratch tab and a release tab do not deserve the same delegation policy. Overrides are in-memory only, so on restart every surface returns to the stored default.
+
+The per-tab override has no UI entry point yet: today the toggle is global. Wiring it to the command palette and `cmux pilot` is the next step.
 
 ## Limits
 
