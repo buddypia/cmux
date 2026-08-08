@@ -273,6 +273,42 @@ Opt-in AI auto-naming of workspaces and tabs from agent conversation content. Wh
 
 Default: `false`. Manual renames (sidebar, command palette, CLI, or `/rename`) always win: a workspace or tab you renamed yourself is never auto-named again until you clear its custom name. Enable it from **Settings > Automation > Workspace Auto-Naming**.
 
+## `automation.pilotMode`
+
+Lets cmux answer an agent's pending permission requests and questions for you instead of leaving them waiting. See [pilot-mode.md](pilot-mode.md) for the full decision model, the guardrails, and the audit log.
+
+```json
+{
+  "automation": {
+    "pilotMode": {
+      "enabled": true,
+      "runMode": "shadow",
+      "instructions": "Prefer the smallest change that passes tests. Never touch anything under migrations/.",
+      "answerPermissionRequests": true,
+      "answerQuestions": true,
+      "autoAllowReadOnly": true,
+      "denyPatterns": ["migrations/", "infra/"],
+      "maxConsecutiveDecisions": 25,
+      "judgeTimeoutSeconds": 25
+    }
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Master switch. Also toggleable per tab, which overrides this for that surface until cmux restarts. |
+| `runMode` | `"shadow"` | `shadow` records the verdict it *would* have sent and lets you answer; `active` sends it. |
+| `instructions` | `""` | Standing policy given to the reviewer with every request. Can only make Pilot Mode more cautious. |
+| `answerPermissionRequests` | `true` | Answer tool/permission prompts. |
+| `answerQuestions` | `true` | Answer `AskUserQuestion` prompts. |
+| `autoAllowReadOnly` | `true` | Approve reads and searches instantly without a reviewer call. Turn off to apply `instructions` to them too. |
+| `denyPatterns` | `[]` | Substrings that always come back to you. Accepts an array or a newline-separated string. |
+| `maxConsecutiveDecisions` | `25` | Automatic answers in a row on one surface before Pilot Mode forces you back in. Your own answer resets it. |
+| `judgeTimeoutSeconds` | `25` | Reviewer budget. On timeout the request falls back to you. |
+
+Default: off, and `shadow` when first enabled. Plan approvals (`ExitPlanMode`) are never automated. Irreversible, outward-facing, and credential-related actions are always handed back to you regardless of `instructions`. Configure from **Settings > Automation > Pilot Mode**.
+
 ## `diffViewer.defaultLayout`
 
 Controls the initial layout for newly opened diff viewers.

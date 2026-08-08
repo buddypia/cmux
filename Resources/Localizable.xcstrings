@@ -160355,6 +160355,329 @@
         }
       }
     },
+    "settings.automation.pilotMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pilot Mode"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パイロットモード"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.activeWarning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active mode answers without you. Run in Shadow first and check the log to see how it would have decided."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティブモードは自分が見ていなくても答えます。まずシャドウで動かし、記録でどう判断していたかを確かめてください。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.answerPermissionRequests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer Permission Requests"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "許可の確認に答える"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.answerQuestions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer Questions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "質問に答える"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.autoAllowReadOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approve Read-Only Calls Instantly"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取りのみの操作をすぐに許可する"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.autoAllowReadOnly.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skips the reviewer for reads and searches. Turn off to apply your instructions to them too."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取りや検索では判断を省略します。オフにすると、それらにも指示が適用されます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.denyPatterns": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always Ask Me About"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "必ず自分に確認する対象"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.denyPatterns.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One substring per line. Matching requests always come back to you."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1行に1つの文字列。一致した要求は必ず自分に戻ってきます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.instructions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instructions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指示"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.instructions.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standing policy passed to the reviewer with every request."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "毎回の判断時に渡される、常時有効な方針です。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pilot Mode reviews an agent's pending permission requests and questions and can answer them for you, using your own agent CLI to decide. Irreversible, outward-facing, and credential-related actions are always handed back to you, whatever your instructions say, and plan approvals are never automated. Every verdict is logged to ~/.cmuxterm/pilot-mode.jsonl."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パイロットモードは、エージェントが待っている許可の確認や質問を、自分のエージェント CLI を使って判断し、代わりに答えます。取り消せない操作、外部に影響する操作、認証情報に関わる操作は、指示の内容にかかわらず必ず自分に戻されます。計画の承認が自動化されることはありません。判断はすべて ~/.cmuxterm/pilot-mode.jsonl に記録されます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.runMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "動作モード"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.runMode.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active (answer for me)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティブ（代わりに答える）"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.runMode.active.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers on your behalf. You can still answer first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "代わりに答えます。自分が先に答えることもできます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.runMode.shadow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shadow (record only)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "シャドウ（記録のみ）"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.runMode.shadow.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only records what it would have answered. Nothing is sent."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "どう答えるつもりだったかを記録するだけで、実際には送信しません。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.subtitleActive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cmux answers routine requests for you."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定型的な確認には cmux が代わりに答えます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.subtitleOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You answer every permission request and question."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "許可の確認や質問には、すべて自分で答えます。"
+          }
+        }
+      }
+    },
+    "settings.automation.pilotMode.subtitleShadow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording verdicts only; you still answer."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "判断を記録するだけで、答えるのは自分のままです。"
+          }
+        }
+      }
+    },
     "settings.automation.port.note": {
       "extractionState": "manual",
       "localizations": {
@@ -186806,6 +187129,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "automation.suppressSubagentNotifications 子代理 巢狀 子級代理 codex claude hooks 通知"
+          }
+        }
+      }
+    },
+    "settings.search.alias.setting.automation.pilot-mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.pilotMode pilot mode autopilot auto approve auto-approve autoapprove automatic approval approve for me answer permission requests questions unattended away afk delegate agent decisions shadow active dry run guardrails instructions deny patterns"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "automation.pilotMode パイロットモード 自動承認 自動応答 自動で答える 代わりに答える 許可 確認 質問 留守 放置 委任 シャドウ アクティブ 記録のみ ガードレール 指示 除外パターン"
           }
         }
       }

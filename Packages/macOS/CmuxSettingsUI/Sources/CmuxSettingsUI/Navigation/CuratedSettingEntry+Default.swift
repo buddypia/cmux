@@ -270,6 +270,24 @@ extension Array where Element == CuratedSettingEntry {
                 ),
                 anchorPath: "automation.workspaceAutoNaming"
             ),
+            .init(
+                section: .automation,
+                id: "pilot-mode",
+                title: String(localized: "settings.automation.pilotMode", defaultValue: "Pilot Mode"),
+                detailText: [
+                    String(localized: "settings.automation.pilotMode.subtitleOff", defaultValue: "You answer every permission request and question."),
+                    String(localized: "settings.automation.pilotMode.subtitleActive", defaultValue: "cmux answers routine requests for you."),
+                    String(localized: "settings.automation.pilotMode.note", defaultValue: "Pilot Mode reviews an agent's pending permission requests and questions and can answer them for you, using your own agent CLI to decide. Irreversible, outward-facing, and credential-related actions are always handed back to you, whatever your instructions say, and plan approvals are never automated. Every verdict is logged to ~/.cmuxterm/pilot-mode.jsonl."),
+                    String(localized: "settings.automation.pilotMode.instructions", defaultValue: "Instructions"),
+                    String(localized: "settings.automation.pilotMode.denyPatterns", defaultValue: "Always Ask Me About"),
+                ].joined(separator: " "),
+                paths: ["automation.pilotMode.enabled"],
+                synonyms: String(
+                    localized: "settings.search.alias.setting.automation.pilot-mode",
+                    defaultValue: "automation.pilotMode pilot mode autopilot auto approve auto-approve autoapprove automatic approval approve for me answer permission requests questions unattended away afk delegate agent decisions shadow active dry run guardrails instructions deny patterns"
+                ),
+                anchorPath: "automation.pilotMode.enabled"
+            ),
             .init(section: .automation, id: "port-base", title: "Port Base", synonyms: "automation.portBase cmux_port start first base env environment variable"),
             .init(section: .automation, id: "port-range", title: "Port Range Size", synonyms: "automation.portRange cmux_port_end range size count env ports"),
 

@@ -1509,6 +1509,10 @@ C0DE71B10000000000000001 /* AppDelegate+AgentChatNotifications.swift in Sources 
 		8672FA028672FA028672FA02 /* PiFeedLegacyOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8672FA018672FA018672FA01 /* PiFeedLegacyOwnershipTests.swift */; };
 		8672F0018672F0018672F001 /* PiFeedOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8672F0028672F0028672F002 /* PiFeedOwnershipTests.swift */; };
 		8672F0068672F0068672F006 /* PiFeedV2CallResultBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8672F0058672F0058672F005 /* PiFeedV2CallResultBox.swift */; };
+		P110700000000000000F006 /* PilotModeAgentJudge.swift in Sources */ = {isa = PBXBuildFile; fileRef = P110700000000000000F005 /* PilotModeAgentJudge.swift */; };
+		P110700000000000000F008 /* PilotModeAuditLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = P110700000000000000F007 /* PilotModeAuditLog.swift */; };
+		P110700000000000000F002 /* PilotModeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = P110700000000000000F001 /* PilotModeController.swift */; };
+		P110700000000000000F004 /* PilotModeSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = P110700000000000000F003 /* PilotModeSettingsStore.swift */; };
 		B3575000000000000000000A /* PiVaultAgentPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35750000000000000000009 /* PiVaultAgentPersistenceTests.swift */; };
 		5B0C00010000000000000005 /* PortalDividerCursorOcclusionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0C00010000000000000006 /* PortalDividerCursorOcclusionTests.swift */; };
 		B1D5CEE0407545B6B57E3B0E /* PortalHitTestingPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4335E241A33344C48361AD51 /* PortalHitTestingPerformanceTests.swift */; };
@@ -4116,6 +4120,10 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 		8672FA018672FA018672FA01 /* PiFeedLegacyOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiFeedLegacyOwnershipTests.swift; sourceTree = "<group>"; };
 		8672F0028672F0028672F002 /* PiFeedOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiFeedOwnershipTests.swift; sourceTree = "<group>"; };
 		8672F0058672F0058672F005 /* PiFeedV2CallResultBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiFeedV2CallResultBox.swift; sourceTree = "<group>"; };
+		P110700000000000000F005 /* PilotModeAgentJudge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PilotModeAgentJudge.swift; sourceTree = "<group>"; };
+		P110700000000000000F007 /* PilotModeAuditLog.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PilotModeAuditLog.swift; sourceTree = "<group>"; };
+		P110700000000000000F001 /* PilotModeController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PilotModeController.swift; sourceTree = "<group>"; };
+		P110700000000000000F003 /* PilotModeSettingsStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PilotModeSettingsStore.swift; sourceTree = "<group>"; };
 		B35750000000000000000009 /* PiVaultAgentPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiVaultAgentPersistenceTests.swift; sourceTree = "<group>"; };
 		5B0C00010000000000000006 /* PortalDividerCursorOcclusionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortalDividerCursorOcclusionTests.swift; sourceTree = "<group>"; };
 		4335E241A33344C48361AD51 /* PortalHitTestingPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortalHitTestingPerformanceTests.swift; sourceTree = "<group>"; };
@@ -7111,6 +7119,7 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				105D8421DF4E2E09D255D785 /* Auth */,
 				590E4F5F342E5B27010ECC8D /* Cloud */,
 				FEED0000000000000000F003 /* Feed */,
+				P110700000000000000G001 /* PilotMode */,
 				C57B00040000000000000002 /* TerminalController+CustomSidebarCommands.swift */,
 				8054A0040000000000000004 /* TerminalController+BrowserAutomationRecovery.swift */,
 				C57B00050000000000000002 /* CmuxExtensionSidebarSelection+CustomSidebarName.swift */,
@@ -7944,6 +7953,18 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				5E2701030000000000000002 /* MacSentryStartupPolicyTests.swift */,
 			);
 			path = cmuxTests;
+			sourceTree = "<group>";
+		};
+		P110700000000000000G001 /* PilotMode */ = {
+			isa = PBXGroup;
+			children = (
+				P110700000000000000F001 /* PilotModeController.swift */,
+				P110700000000000000F003 /* PilotModeSettingsStore.swift */,
+				P110700000000000000F005 /* PilotModeAgentJudge.swift */,
+				P110700000000000000F007 /* PilotModeAuditLog.swift */,
+			);
+			name = PilotMode;
+			path = PilotMode;
 			sourceTree = "<group>";
 		};
 		FEED0000000000000000F003 /* Feed */ = {
@@ -9323,6 +9344,10 @@ C0DE71B10000000000000002 /* AppDelegate+AgentChatNotifications.swift */ = {isa =
 				D1F0A00100000000000000A3 /* PhonePushPayload.swift in Sources */,
 				D1F0A00100000000000000A5 /* PhonePushPayloadKind.swift in Sources */,
 				B79500210000000000000001 /* PIDPresence.swift in Sources */,
+				P110700000000000000F006 /* PilotModeAgentJudge.swift in Sources */,
+				P110700000000000000F008 /* PilotModeAuditLog.swift in Sources */,
+				P110700000000000000F002 /* PilotModeController.swift in Sources */,
+				P110700000000000000F004 /* PilotModeSettingsStore.swift in Sources */,
 				D0C658660000000000000004 /* PortalSplitDividerCacheInvalidator.swift in Sources */,
 				D0C658660000000000000002 /* PortalSplitDividerRegion.swift in Sources */,
 				B79500310000000000000001 /* PortLsofScanResult.swift in Sources */,

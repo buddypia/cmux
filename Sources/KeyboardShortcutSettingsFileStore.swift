@@ -1,3 +1,4 @@
+import CMUXAgentLaunch
 import Combine
 import CmuxFoundation
 import CmuxSettings
@@ -849,6 +850,7 @@ final class CmuxSettingsFileStore {
                 logInvalid("automation.kiroNotificationLevel", sourcePath: sourcePath)
             }
         }
+        parsePilotModeSection(section, sourcePath: sourcePath, snapshot: &snapshot)
         if let value = jsonInt(section["portBase"]) {
             guard value > 0 else {
                 logInvalid("automation.portBase", sourcePath: sourcePath)
@@ -862,6 +864,93 @@ final class CmuxSettingsFileStore {
                 return
             }
             snapshot.managedUserDefaults[AutomationSettings.portRangeKey] = .int(value)
+        }
+    }
+
+    /// Parses `automation.pilotMode`. Every value is independently validated and
+    /// a bad one is logged and dropped rather than failing the section, so a
+    /// typo in `runMode` cannot silently take Pilot Mode out of shadow mode or
+    /// discard the user's instructions.
+    private func parsePilotModeSection(
+        _ section: [String: Any],
+        sourcePath: String,
+        snapshot: inout ResolvedSettingsSnapshot
+    ) {
+        guard let raw = section["pilotMode"] else { return }
+        guard let pilot = raw as? [String: Any] else {
+            logInvalid("automation.pilotMode", sourcePath: sourcePath)
+            return
+        }
+        let catalog = AutomationCatalogSection()
+
+        let booleans: [(key: String, defaultsKey: String)] = [
+            ("enabled", catalog.pilotMode.userDefaultsKey),
+            ("answerPermissionRequests", catalog.pilotModeAnswersPermissionRequests.userDefaultsKey),
+            ("answerQuestions", catalog.pilotModeAnswersQuestions.userDefaultsKey),
+            ("autoAllowReadOnly", catalog.pilotModeAutoAllowReadOnly.userDefaultsKey),
+        ]
+        for entry in booleans {
+            if let value = jsonBool(pilot[entry.key]) {
+                snapshot.managedUserDefaults[entry.defaultsKey] = .bool(value)
+            } else if pilot.keys.contains(entry.key) {
+                logInvalid("automation.pilotMode.\(entry.key)", sourcePath: sourcePath)
+            }
+        }
+
+        if let value = jsonString(pilot["runMode"]) {
+            if PilotModeRunMode(rawValue: value) != nil {
+                snapshot.managedUserDefaults[catalog.pilotModeRunMode.userDefaultsKey] = .string(value)
+            } else {
+                logInvalid("automation.pilotMode.runMode", sourcePath: sourcePath)
+            }
+        } else if pilot.keys.contains("runMode") {
+            logInvalid("automation.pilotMode.runMode", sourcePath: sourcePath)
+        }
+
+        if let value = jsonString(pilot["instructions"]) {
+            snapshot.managedUserDefaults[catalog.pilotModeInstructions.userDefaultsKey] = .string(value)
+        } else if pilot.keys.contains("instructions") {
+            logInvalid("automation.pilotMode.instructions", sourcePath: sourcePath)
+        }
+
+        // Accepted as either a JSON array or the newline-separated string the
+        // Settings text area produces, so hand-edited config and the UI agree.
+        if pilot.keys.contains("denyPatterns") {
+            if let patterns = pilot["denyPatterns"] as? [Any] {
+                let joined = patterns.compactMap { $0 as? String }
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n")
+                snapshot.managedUserDefaults[catalog.pilotModeDenyPatterns.userDefaultsKey] = .string(joined)
+            } else if let raw = jsonString(pilot["denyPatterns"]) {
+                snapshot.managedUserDefaults[catalog.pilotModeDenyPatterns.userDefaultsKey] = .string(raw)
+            } else {
+                logInvalid("automation.pilotMode.denyPatterns", sourcePath: sourcePath)
+            }
+        }
+
+        if let value = jsonInt(pilot["maxConsecutiveDecisions"]) {
+            if value >= 1 && value <= 1000 {
+                snapshot.managedUserDefaults[
+                    catalog.pilotModeMaxConsecutiveDecisions.userDefaultsKey
+                ] = .int(value)
+            } else {
+                logInvalid("automation.pilotMode.maxConsecutiveDecisions", sourcePath: sourcePath)
+            }
+        } else if pilot.keys.contains("maxConsecutiveDecisions") {
+            logInvalid("automation.pilotMode.maxConsecutiveDecisions", sourcePath: sourcePath)
+        }
+
+        if let value = jsonInt(pilot["judgeTimeoutSeconds"]) {
+            if value >= 5 && value <= 90 {
+                snapshot.managedUserDefaults[
+                    catalog.pilotModeJudgeTimeout.userDefaultsKey
+                ] = .double(Double(value))
+            } else {
+                logInvalid("automation.pilotMode.judgeTimeoutSeconds", sourcePath: sourcePath)
+            }
+        } else if pilot.keys.contains("judgeTimeoutSeconds") {
+            logInvalid("automation.pilotMode.judgeTimeoutSeconds", sourcePath: sourcePath)
         }
     }
 
