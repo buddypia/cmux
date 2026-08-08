@@ -4,10 +4,12 @@
 #
 # macOS allocates pipe buffers from a fixed pool. When it runs dry every new
 # pipe gets a small buffer instead of the usual 16-64 KB, and anything that
-# writes more than that into a pipe nobody is draining deadlocks. A build is the
-# usual casualty: its compiler probe writes ~20 KB and hangs with no output at
-# `ExecuteExternalTool ... clang -v -E -dM`. reload.sh refuses to start in that
-# state and points here.
+# writes more than that into a pipe nobody is draining deadlocks.
+#
+# Builds no longer care: reload.sh exports `CCC_OVERRIDE_OPTIONS=x-v` so the
+# compiler probe stops writing the stderr nothing was reading. This script is
+# for finding out why a machine got into that state, since everything else that
+# pipes more than a few KB is still exposed.
 #
 # The reading that matters is the one taken under load. A pipe measured at rest
 # can come back a healthy 65536 on a machine where the same pipe collapses to
@@ -58,11 +60,13 @@ under_load="$(measure "$HEADROOM_PROBES")"
 echo "Pipe capacity at rest:                 ${at_rest} bytes"
 echo "Pipe capacity with ${HEADROOM_PROBES} pipes in use:     ${under_load} bytes"
 if (( under_load >= MINIMUM_BYTES )); then
-  echo "Healthy. A build's ~20 KB compiler probe will not deadlock."
+  echo "Healthy."
 else
-  echo "DEGRADED. Expected >= ${MINIMUM_BYTES}. A build will hang at the compiler probe."
+  echo "DEGRADED. Expected >= ${MINIMUM_BYTES}. Anything writing more than that into"
+  echo "an undrained pipe will deadlock. reload.sh works around the one case that"
+  echo "hits builds; other tooling is on its own."
   if (( at_rest >= MINIMUM_BYTES )); then
-    echo "  (At rest it looks fine, which is why a single reading is not enough.)"
+    echo "  (At rest it looks fine, which is why a single reading proves nothing.)"
   fi
 fi
 echo ""

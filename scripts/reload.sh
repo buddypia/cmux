@@ -69,93 +69,39 @@ XCODEBUILD_OUTPUT_VALID=0
 XCODEBUILD_CLEANED_OUTPUTS=0
 
 # Before doing anything else, the build probes the compiler with
-# `clang -v -E -dM -x c -c /dev/null` and reads the result through a pipe that
-# SWBBuildService does not drain while clang is writing. The probe emits about
-# 20 KB. macOS carves pipe buffers out of a fixed kernel pool and, once that
-# pool is exhausted, hands every new pipe a fraction of the usual 16-64 KB --
-# so clang blocks in write() forever and the build hangs at
-# `ExecuteExternalTool ... clang -v -E -dM` with no output and no timeout.
+# `clang -v -E -dM -x c -c /dev/null`. SWBBuildService reads that probe's
+# stdout -- the ~15 KB `-dM` macro dump it actually wants -- and never drains
+# its stderr, which `-v` fills with another ~5 KB. Nobody notices while a pipe
+# holds 64 KB. On a machine whose kernel pipe pool is low, new pipes come back
+# at a fraction of that, clang blocks in write() inside `Command::Print`, and
+# the build hangs at `ExecuteExternalTool ... clang -v -E -dM` with no output,
+# no error, and no timeout. It reproduces on an empty one-file package, so a
+# hang there is never evidence about your branch.
 #
-# Measuring one pipe at rest is not enough, and getting that wrong costs the
-# whole build timeout. Observed on a machine holding ~5,100 live pipes:
+# `CCC_OVERRIDE_OPTIONS=x-v` deletes `-v` from every clang driver invocation.
+# Measured against the probe: stderr drops from 4,843 bytes to 145 and stdout
+# stays byte-identical, so the only thing lost is output nothing was reading.
+# Real compile commands do not pass `-v`, so nothing else changes; a full
+# `cmux-unit build-for-testing` under it completes with 0 errors and the tests
+# run.
 #
-#   at rest              65536 bytes   <- looks perfectly healthy
-#   with 96 more in use  16384 bytes
-#   during a build         512 bytes   <- clang deadlocks here
+# Applied unconditionally, and that is deliberate. An earlier version measured
+# the pool first and only intervened when it looked low. That does not work:
+# capacity fluctuates, and the build's own startup is what tips the pool over,
+# so the reading comes back healthy and the build then deadlocks on its own
+# probe. Gating on a measurement taken before the thing that causes the problem
+# is worse than not gating at all, because it looks like it is protecting you.
 #
-# The build is what tips the pool over, so the question is not "how big is a
-# pipe right now" but "is there room for the pipes a build is about to create".
-# Hold a modest number open -- well under what a real build spawns -- and check
-# that a new pipe can still absorb the probe.
-# A pipe must still hold this much with PIPE_HEADROOM_PROBES others open. The
-# probe needs ~20 KB in one pipe when stdout and stderr share it.
-MINIMUM_PIPE_CAPACITY_BYTES=32768
-PIPE_HEADROOM_PROBES=96
-
-measure_pipe_capacity_under_load() {
-  python3 -c '
-import os
-import sys
-
-held = []
-try:
-    for _ in range(int(sys.argv[1])):
-        held.append(os.pipe())
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(write_fd, False)
-    capacity = 0
-    try:
-        while True:
-            try:
-                capacity += os.write(write_fd, b"x" * 1024)
-            except BlockingIOError:
-                break
-    finally:
-        os.close(read_fd)
-        os.close(write_fd)
-    print(capacity)
-except OSError:
-    # Out of descriptors or similar: not evidence about the pipe pool.
-    pass
-finally:
-    for read_fd, write_fd in held:
-        os.close(read_fd)
-        os.close(write_fd)
-' "$PIPE_HEADROOM_PROBES" 2>/dev/null || echo ""
-}
-
-require_usable_pipe_buffers() {
-  if [[ "${CMUX_SKIP_PIPE_CAPACITY_CHECK:-}" == "1" ]]; then
-    return 0
+# scripts/diagnose-pipe-pressure.sh reports the pool if you want to know why a
+# machine got into that state. CMUX_NO_CLANG_PROBE_WORKAROUND=1 opts out.
+if [[ "${CMUX_NO_CLANG_PROBE_WORKAROUND:-}" != "1" ]]; then
+  # Preserve anything the caller set; the override is a list of edits.
+  if [[ -n "${CCC_OVERRIDE_OPTIONS:-}" ]]; then
+    export CCC_OVERRIDE_OPTIONS="${CCC_OVERRIDE_OPTIONS} x-v"
+  else
+    export CCC_OVERRIDE_OPTIONS="x-v"
   fi
-  local capacity
-  capacity="$(measure_pipe_capacity_under_load)"
-  # An unreadable measurement is not evidence of a problem; let the build run.
-  if ! is_positive_integer "${capacity:-}"; then
-    return 0
-  fi
-  if (( capacity >= MINIMUM_PIPE_CAPACITY_BYTES )); then
-    return 0
-  fi
-  {
-    echo ""
-    echo "error: with ${PIPE_HEADROOM_PROBES} pipes in use this machine hands out ${capacity}-byte pipes"
-    echo "       (need >= ${MINIMUM_PIPE_CAPACITY_BYTES}). The kernel pipe pool has no room for a build."
-    echo "       xcodebuild's compiler probe writes ~20 KB into a pipe nothing is"
-    echo "       draining, so the build would hang forever at"
-    echo "       'ExecuteExternalTool ... clang -v -E -dM' instead of failing."
-    echo ""
-    echo "       The kernel pipe pool is exhausted by long-lived processes. To see"
-    echo "       the biggest holders:"
-    echo ""
-    echo "         scripts/diagnose-pipe-pressure.sh"
-    echo ""
-    echo "       Quit them (or reboot) and run this again. To build anyway, set"
-    echo "       CMUX_SKIP_PIPE_CAPACITY_CHECK=1."
-    echo ""
-  } >&2
-  exit 75
-}
+fi
 
 should_skip_ghostty_cli_helper_zig_build() {
   if [[ "${CMUX_SKIP_ZIG_BUILD:-}" == "1" ]]; then
@@ -727,10 +673,6 @@ if [[ -n "$DERIVED_DATA" ]]; then
     XCODEBUILD_TAG_APP_PATH="${BUILD_PRODUCTS_DEBUG_DIR}/${APP_NAME}.app"
   fi
 fi
-
-# Checked before the log redirect and before any build work, so the diagnosis
-# lands on the terminal and costs nothing when the machine is healthy.
-require_usable_pipe_buffers
 
 # Save the original stdout/stderr so the EXIT trap can write the user-facing
 # summary after the body redirect, then redirect bulk output into the log.
