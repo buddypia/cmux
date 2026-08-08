@@ -66,6 +66,7 @@ succeed before anything else is believed.
 XEOF
 )"'
     check 0 'ps aux | grep xcodebuild'
+    check 0 'cmux notify --body "Was: xcodebuild deadlocked here. Now: cmux-unit build-for-testing succeeds."'
     check 0 'git commit --amend'
     check 0 'git status --short'
 
@@ -111,8 +112,11 @@ import sys
 text = sys.stdin.read().replace("\\\n", " ")
 # xcodebuild in command position: start of line or after a shell separator,
 # optionally behind FOO=bar env assignments.
+# Command position only: start of line, or after a shell separator, possibly
+# behind FOO=bar env assignments. A bare word boundary matched the token
+# mid-sentence, which is how prose about a build kept tripping this.
 invocation = re.compile(
-    r"(?:^|[;&|]|\B)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*xcodebuild(\s.*)?$"
+    r"(?:^|[;&|]\s*|\(\s*|`\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*xcodebuild(\s.*)?$"
 )
 verb = re.compile(r"\s(build|build-for-testing|test|test-without-building|archive)(\s|$)")
 
