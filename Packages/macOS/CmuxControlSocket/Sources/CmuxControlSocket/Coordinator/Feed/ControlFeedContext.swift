@@ -1,3 +1,5 @@
+public import Foundation
+
 /// The feed-domain (workstream) slice of the control-command seam (a constituent
 /// of the ``ControlCommandContext`` umbrella).
 ///
@@ -32,4 +34,23 @@ public protocol ControlFeedContext: AnyObject {
     ///   (mirrors the legacy `pending_only` filter on `FeedCoordinator.snapshot`).
     /// - Returns: The feed items as JSON values, in snapshot order.
     func controlFeedSnapshotItems(pendingOnly: Bool) -> [JSONValue]
+
+    /// Reports Pilot Mode configuration for `feed.pilot.status`.
+    ///
+    /// - Parameter surfaceID: When non-nil, the resolved state for that surface
+    ///   including any override; when nil, the stored global configuration.
+    func controlFeedPilotStatus(surfaceID: UUID?) -> JSONValue
+
+    /// Turns Pilot Mode off for `feed.pilot.disable`.
+    ///
+    /// There is deliberately no enable counterpart. Any agent running in a cmux
+    /// terminal holds the socket credentials, so an enable verb would let an
+    /// agent grant itself auto-approval — the exact thing Pilot Mode's
+    /// guardrails exist to prevent. Turning it off is the safe direction and
+    /// costs the caller nothing but extra prompts, so only that is exposed.
+    ///
+    /// - Parameter surfaceID: When non-nil, sets an off override on that surface
+    ///   and leaves the global switch alone; when nil, turns the global switch
+    ///   off.
+    func controlFeedPilotDisable(surfaceID: UUID?) -> JSONValue
 }

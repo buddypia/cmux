@@ -2550,6 +2550,8 @@ class TerminalController {
             "feed.exit_plan.reply",
             "feed.jump",
             "feed.list",
+            "feed.pilot.status",
+            "feed.pilot.disable",
             "surface.list",
             "surface.current",
             "surface.focus",

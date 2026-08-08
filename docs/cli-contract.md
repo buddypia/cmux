@@ -67,6 +67,7 @@ Environment:
 | `enable-browser` | Re-enable cmux browser creation and link interception. |
 | `browser-status` | Print whether cmux browser creation and link interception are enabled. |
 | `agent-hibernation` | Enable or disable routine Agent Hibernation. |
+| `pilot` | Report Pilot Mode, or turn it off globally or for one tab. Cannot turn it on. |
 | `restore` | Replace the CLI with a process restored from structured surface state. |
 | `restore-session` | Restore the previously saved cmux session. |
 | `open` | Open files, directories, or URLs in cmux. |
@@ -560,6 +561,7 @@ the expected text without connecting to a cmux socket.
 - `cmux enable-browser --help` -> `Usage: cmux enable-browser [--json]`
 - `cmux browser-status --help` -> `Usage: cmux browser-status [--json]`
 - `cmux agent-hibernation --help` -> `Usage: cmux agent-hibernation <on|off> [--json]`
+- `cmux pilot --help` -> `Usage:` (see [pilot-mode.md](pilot-mode.md))
 - `cmux restore --help` -> `Usage: cmux restore <kind> <checkpoint-id>`
 - `cmux restore-session --help` -> `Usage: cmux restore-session`
 - `cmux open --help` -> `Usage: cmux open <path-or-url>...`

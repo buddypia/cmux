@@ -15,7 +15,7 @@ It is off by default, and when first enabled it runs in **shadow mode**: it eval
 }
 ```
 
-Turn it on from **Settings > Automation > Pilot Mode**, from the command palette (**Pilot Mode**), or in `~/.config/cmux/cmux.json`.
+Turn it on from **Settings > Automation > Pilot Mode**, from the command palette (**Pilot Mode**), or in `~/.config/cmux/cmux.json`. It cannot be turned on from the CLI — see [The CLI](#the-cli).
 
 ## What it answers
 
@@ -105,9 +105,30 @@ Run in shadow until that distribution looks right, then switch `runMode` to `act
 
 ## Scope
 
-The stored setting is the default for every surface, and the resolver supports per-tab overrides on top of it — cmux runs many agents side by side, and a scratch tab and a release tab do not deserve the same delegation policy. Overrides are in-memory only, so on restart every surface returns to the stored default.
+The stored setting is the default for every surface, and a tab may override it — cmux runs many agents side by side, and a scratch tab and a release tab do not deserve the same delegation policy.
 
-The per-tab override has no UI entry point yet: today the toggle is global. Wiring it to the command palette and `cmux pilot` is the next step.
+From the command palette:
+
+- **Enable/Disable Pilot Mode for This Tab** sets the override.
+- **Use the Default Pilot Mode for This Tab** removes it, so the tab follows the global switch again. It only appears when an override exists.
+
+Overrides are in-memory only. A per-tab toggle is a statement about the task in front of you, not a preference worth resurrecting days later on a tab whose contents have moved on — and the safe direction on restart is back to the stored default. Closing a tab drops its override and its decision budget, so a recycled surface id cannot inherit a stale opt-in.
+
+## The CLI
+
+```bash
+cmux pilot                       # global status
+cmux pilot --this-tab            # status for the tab you are in
+cmux pilot off                   # turn the global switch off
+cmux pilot off --this-tab        # turn this tab off, leaving the global switch alone
+cmux pilot off --surface <uuid>  # ...or another tab; `cmux surface list --json` has the ids
+```
+
+Add `--json` for the raw payload.
+
+**There is no `cmux pilot on`, and that is the point.** Every agent running in a cmux terminal holds the socket credentials its hooks use, and cmux cannot tell a human typing in a tab from the agent running in it. A scriptable enable would let an agent grant itself the auto-approval that the guardrails exist to withhold. Turning Pilot Mode off is the safe direction and costs nothing but extra prompts, so only off is scriptable; turning it on is a deliberate act at the UI.
+
+Settings, `cmux.json`, the command palette, and the CLI all resolve and mutate through the same store, so there is one answer to "is Pilot Mode on for this tab" no matter which one you ask.
 
 ## Limits
 

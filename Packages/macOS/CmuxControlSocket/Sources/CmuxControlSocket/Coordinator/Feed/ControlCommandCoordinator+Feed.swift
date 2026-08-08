@@ -22,9 +22,60 @@ extension ControlCommandCoordinator {
             return feedJump(request.params)
         case "feed.list":
             return feedList(request.params)
+        case "feed.pilot.status":
+            return feedPilotStatus(request.params)
+        case "feed.pilot.disable":
+            return feedPilotDisable(request.params)
         default:
             return nil
         }
+    }
+
+    /// `feed.pilot.status` — report Pilot Mode configuration, optionally for one
+    /// surface.
+    func feedPilotStatus(_ params: [String: JSONValue]) -> ControlCallResult {
+        switch pilotScope(params) {
+        case .invalidSurface:
+            return Self.invalidPilotSurface
+        case .global:
+            return .ok(context?.controlFeedPilotStatus(surfaceID: nil) ?? .object([:]))
+        case .surface(let surfaceID):
+            return .ok(context?.controlFeedPilotStatus(surfaceID: surfaceID) ?? .object([:]))
+        }
+    }
+
+    /// `feed.pilot.disable` — turn Pilot Mode off globally or for one surface.
+    /// There is no enable counterpart; see ``ControlFeedContext``.
+    func feedPilotDisable(_ params: [String: JSONValue]) -> ControlCallResult {
+        switch pilotScope(params) {
+        case .invalidSurface:
+            return Self.invalidPilotSurface
+        case .global:
+            return .ok(context?.controlFeedPilotDisable(surfaceID: nil) ?? .object([:]))
+        case .surface(let surfaceID):
+            return .ok(context?.controlFeedPilotDisable(surfaceID: surfaceID) ?? .object([:]))
+        }
+    }
+
+    enum PilotScope {
+        case global
+        case surface(UUID)
+        case invalidSurface
+    }
+
+    /// An absent `surface` means "global". A present but unparseable one is an
+    /// error rather than a silent fall back to global: quietly widening the
+    /// scope of a *disable* from one tab to the whole app is the opposite of
+    /// what the caller asked for.
+    func pilotScope(_ params: [String: JSONValue]) -> PilotScope {
+        guard let raw = rawString(params, "surface") else { return .global }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let surfaceID = UUID(uuidString: trimmed) else { return .invalidSurface }
+        return .surface(surfaceID)
+    }
+
+    static var invalidPilotSurface: ControlCallResult {
+        .err(code: "invalid_params", message: "surface must be a surface UUID", data: nil)
     }
 
     /// `feed.jump` — resolve whether a workstream id maps to a known surface.

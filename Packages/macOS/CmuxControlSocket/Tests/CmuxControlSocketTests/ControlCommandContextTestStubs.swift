@@ -39,6 +39,8 @@ extension ControlAppFocusContext {
 extension ControlFeedContext {
     func controlFeedResolvePossibleSurface(workstreamID: String) -> Bool { false }
     func controlFeedSnapshotItems(pendingOnly: Bool) -> [JSONValue] { [] }
+    func controlFeedPilotStatus(surfaceID: UUID?) -> JSONValue { .object([:]) }
+    func controlFeedPilotDisable(surfaceID: UUID?) -> JSONValue { .object([:]) }
 }
 
 extension ControlPaneContext {
