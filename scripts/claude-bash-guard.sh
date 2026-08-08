@@ -33,6 +33,9 @@ if [ "${1:-}" = "--self-test" ]; then
     # Blocked.
     check 2 'xcodebuild -project cmux.xcodeproj -scheme cmux-unit build-for-testing'
     check 2 'CMUX_SKIP_ZIG_BUILD=1 xcodebuild -scheme cmux -destination x test'
+    check 2 'cd /tmp && xcodebuild -scheme cmux build'
+    check 2 'xcodebuild -scheme cmux \
+  build'
     check 2 '/tmp/cmux-cli list-workspaces'
     check 2 'git add -A'
     check 2 'git add .'
@@ -51,6 +54,18 @@ if [ "${1:-}" = "--self-test" ]; then
     check 0 'ls -la /tmp/cmux-cli'
     check 0 'git add Sources/Foo.swift cmuxTests/Bar.swift'
     check 0 'git commit -q -m "msg"'
+    # Writing about a build failure is not running one. Matching the whole
+    # command as one blob used to block exactly the commit that fixes it.
+    # Writing about a build failure is not running one. Matching the whole
+    # command as one blob used to block exactly the commit that fixes it: the
+    # token on one line of the message, a bare `build` on another.
+    check 0 'git commit -q -m "$(cat <<XEOF
+xcodebuild hangs forever at ExecuteExternalTool clang -v -E -dM when the
+machine runs out of kernel pipe buffer. The cmux-unit build above must
+succeed before anything else is believed.
+XEOF
+)"'
+    check 0 'ps aux | grep xcodebuild'
     check 0 'git commit --amend'
     check 0 'git status --short'
 
@@ -82,16 +97,38 @@ block() {
 #    default DerivedData, which the user's own app and every other agent's
 #    build also use. Informational subcommands are fine, and so is the
 #    Metal Toolchain download CLAUDE.md tells you to run.
-if printf '%s' "$command_line" | grep -qE '(^|[;&|]\s*|\s)xcodebuild\s'; then
-    if printf '%s' "$command_line" | grep -qE '\s(build|build-for-testing|test|test-without-building|archive)(\s|$)' \
-        && ! printf '%s' "$command_line" | grep -q -- '-derivedDataPath'; then
-        block "Blocked: xcodebuild without -derivedDataPath shares the default DerivedData with the user's app and other agents.
+#
+#    Matched per line, with the build verb required to follow the token on that
+#    same line. Scanning the whole command as one blob meant any text that
+#    happened to contain both words tripped it -- including a commit message
+#    describing a build failure, which is a thing you write precisely when you
+#    are trying to fix one.
+if printf '%s' "$command_line" | python3 -c '
+import re
+import sys
+
+# Line continuations first: `xcodebuild \<newline> ... build` is one command.
+text = sys.stdin.read().replace("\\\n", " ")
+# xcodebuild in command position: start of line or after a shell separator,
+# optionally behind FOO=bar env assignments.
+invocation = re.compile(
+    r"(?:^|[;&|]|\B)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*xcodebuild(\s.*)?$"
+)
+verb = re.compile(r"\s(build|build-for-testing|test|test-without-building|archive)(\s|$)")
+
+for line in text.splitlines():
+    for match in invocation.finditer(line):
+        rest = match.group(1) or ""
+        if verb.search(rest) and "-derivedDataPath" not in rest:
+            sys.exit(0)
+sys.exit(1)
+' 2>/dev/null; then
+    block "Blocked: xcodebuild without -derivedDataPath shares the default DerivedData with the user's app and other agents.
 
   ./scripts/reload.sh --tag <tag>                       # to build and run
   xcodebuild ... -derivedDataPath /tmp/cmux-<tag> ...   # to compile only
 
 See CLAUDE.md 'Build and reload'."
-    fi
 fi
 
 # 2. /tmp/cmux-cli points at whichever build reloaded last, which is often the
