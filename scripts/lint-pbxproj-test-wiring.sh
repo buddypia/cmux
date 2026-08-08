@@ -59,9 +59,8 @@ if [ ! -d "$TESTS_DIR" ]; then
   exit 2
 fi
 
-# Locate the cmuxTests PBXNativeTarget and resolve its Sources build phase
-# UUID. We then slice out just that build phase block and look for files inside
-# it — which is exactly the set of files Xcode compiles into cmuxTests.
+# Locate the cmuxTests PBXNativeTarget, resolve its Sources build phase UUID,
+# and list the basenames wired into that phase.
 #
 # Targeting the cmuxTests Sources phase specifically (instead of the whole
 # pbxproj) catches three failure modes:
@@ -72,74 +71,74 @@ fi
 #   3. File is a member of the wrong target (e.g. cmuxUITests or cmux). Its
 #      `<file>.swift in Sources` lines exist in the pbxproj, so a global grep
 #      would pass, but they are not inside the cmuxTests Sources block.
+#
 # `/* cmuxTests */ = {` appears twice in a typical pbxproj: once for the
-# PBXGroup that holds the test files, and once for the PBXNativeTarget. We
-# only care about the native-target block. Use awk to capture every
-# `/* cmuxTests */ = { ... };` block and keep only the one whose `isa =
-# PBXNativeTarget;` line is present.
-tests_target_block="$(awk '
-  /\/\* cmuxTests \*\/ = \{/ { capture = 1; buf = "" }
+# PBXGroup that holds the test files, and once for the PBXNativeTarget. Only
+# the native-target block matters, so keep the one containing
+# `isa = PBXNativeTarget;`.
+#
+# Everything below goes through files rather than pipes or shell variables. An
+# earlier version held the whole Sources phase in a variable and re-scanned it
+# once per test file with `grep -qF <<<"$block"`. `grep -q` exits at its first
+# match, so the shell was left writing the remainder of a ~57 KB here-string
+# into a pipe with no reader: fine only while the content still fit in the
+# kernel's pipe buffer, and a permanent hang for everyone the moment the phase
+# outgrew it. One pass, no per-file subprocesses, no capacity assumption.
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+
+tests_sources_uuid="$(awk '
+  /\/\* cmuxTests \*\/ = \{/ { capture = 1; buf = ""; uuid = "" }
   capture { buf = buf $0 "\n" }
+  capture && /[A-Z0-9]{24} \/\* Sources \*\// && uuid == "" {
+    match($0, /[A-Z0-9]{24}/)
+    uuid = substr($0, RSTART, RLENGTH)
+  }
   capture && /^[[:space:]]*\};[[:space:]]*$/ {
-    if (buf ~ /isa = PBXNativeTarget;/) {
-      print buf
-      exit
-    }
-    capture = 0
-    buf = ""
+    if (buf ~ /isa = PBXNativeTarget;/ && uuid != "") { print uuid; exit }
+    capture = 0; buf = ""; uuid = ""
   }
 ' "$PBXPROJ")"
 
-if [ -z "$tests_target_block" ]; then
-  echo "lint-pbxproj-test-wiring: could not locate cmuxTests PBXNativeTarget in $PBXPROJ" >&2
-  exit 2
-fi
-
-# Xcode UUIDs are conventionally 24 uppercase hex chars, but hand-edited
-# pbxprojs occasionally use 24-char identifiers that include other uppercase
-# letters or digits. Match both.
-tests_sources_uuid="$(printf '%s\n' "$tests_target_block" \
-  | grep -oE '[A-Z0-9]{24} /\* Sources \*/' \
-  | head -n 1 \
-  | awk '{print $1}')"
-
 if [ -z "$tests_sources_uuid" ]; then
-  echo "lint-pbxproj-test-wiring: cmuxTests target has no Sources build phase reference" >&2
+  echo "lint-pbxproj-test-wiring: could not resolve the cmuxTests target's Sources build phase in $PBXPROJ" >&2
   exit 2
 fi
 
-# Slice the PBXSourcesBuildPhase block whose UUID matches the cmuxTests
-# target's Sources phase reference. The block begins with the UUID/Sources
-# header and ends at the next standalone "};" line.
-tests_sources_block="$(awk -v uuid="$tests_sources_uuid" '
-  $0 ~ uuid " /\\* Sources \\*/ = \\{" { capture = 1 }
-  capture { print }
+# Slice that PBXSourcesBuildPhase and emit one wired basename per line.
+awk -v uuid="$tests_sources_uuid" '
+  $0 ~ uuid " /\\* Sources \\*/ = \\{" { capture = 1; next }
   capture && /^[[:space:]]*\};[[:space:]]*$/ { exit }
-' "$PBXPROJ")"
+  capture && /\/\* [^*]+ in Sources \*\/,$/ {
+    entry = $0
+    sub(/^.*\/\* /, "", entry)
+    sub(/ in Sources \*\/,$/, "", entry)
+    print entry
+  }
+' "$PBXPROJ" | LC_ALL=C sort -u > "$work_dir/wired"
 
-if [ -z "$tests_sources_block" ]; then
-  echo "lint-pbxproj-test-wiring: could not slice cmuxTests Sources build phase (uuid=$tests_sources_uuid)" >&2
+if [ ! -s "$work_dir/wired" ]; then
+  echo "lint-pbxproj-test-wiring: cmuxTests Sources build phase (uuid=$tests_sources_uuid) has no files" >&2
   exit 2
 fi
 
-missing=()
-checked=0
+# -L so a symlinked cmuxTests is followed rather than silently yielding nothing.
+find -L "$TESTS_DIR" -maxdepth 1 -type f -name '*.swift' \
+  | sed 's|.*/||' \
+  | LC_ALL=C sort -u > "$work_dir/present"
 
-while IFS= read -r -d '' file; do
-  base="$(basename "$file")"
-  checked=$((checked + 1))
-  # Look for the file's entry inside the cmuxTests Sources phase only.
-  #
-  # Match the full PBX comment `/* <base> in Sources */` as a fixed string
-  # (grep -F) so we don't get a false positive when `<base>` is a substring
-  # of another wired file. Example: `SearchIndexTests.swift` is a suffix of
-  # `SettingsSearchIndexTests.swift`; without these anchors, removing the
-  # former from the Sources phase would still match the latter and the lint
-  # would pass.
-  if ! grep -qF -- "/* $base in Sources */" <<<"$tests_sources_block"; then
-    missing+=("$base")
-  fi
-done < <(find "$TESTS_DIR" -maxdepth 1 -type f -name '*.swift' -print0)
+checked="$(wc -l < "$work_dir/present" | tr -d ' ')"
+
+# A lint that inspected nothing must not report success — that is the same
+# "passes without running" failure this lint exists to catch.
+if [ "$checked" -eq 0 ]; then
+  echo "lint-pbxproj-test-wiring: found no .swift files in $TESTS_DIR" >&2
+  exit 2
+fi
+missing=()
+while IFS= read -r base; do
+  [ -n "$base" ] && missing+=("$base")
+done < <(LC_ALL=C comm -23 "$work_dir/present" "$work_dir/wired")
 
 if [ "${#missing[@]}" -eq 0 ]; then
   echo "lint-pbxproj-test-wiring: ok (checked $checked test files)"
