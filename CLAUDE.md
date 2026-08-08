@@ -31,6 +31,8 @@ If a build sits forever at `ExecuteExternalTool ... clang -v -E -dM -x c -c /dev
 
 `reload.sh` checks for this before building and aborts in about a second. Run `scripts/diagnose-pipe-pressure.sh` to see the capacity and the biggest holders — long-lived agents, shells, and node processes accumulate pipes over days. Quit the top offenders or reboot. `CMUX_SKIP_PIPE_CAPACITY_CHECK=1` forces a build anyway, which will hang.
 
+**Do not try to out-wait or out-tune it.** Capacity fluctuates, so it is tempting to poll until a healthy window opens and start then. That has been tried and does not work: the build's own startup is what tips the pool over, so it exhausts it and deadlocks on its own probe even when the reading was 65536 a second earlier. Warm DerivedData, `-disableAutomaticPackageResolution`, and `-jobs 1` do not change this. The live pipe count has to come down first. There is also no sysctl for the pool size, and no SwiftPM substitute for the app target — it has a bridging header.
+
 Never trust a `==> reload succeeded` line on its own: confirm it also printed `App path:`. A successful reload always does.
 
 Rebuild GhosttyKit.xcframework with Release optimizations:
