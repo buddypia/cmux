@@ -494,9 +494,7 @@ final class FeedCoordinator: @unchecked Sendable {
         // that surface: a person is back in the loop, which is the whole point
         // of the ceiling.
         if !onlyIfAwaiting {
-            PilotModeController.shared.recordHumanDecision(
-                surfaceId: attentionTarget?.workspaceId == nil ? nil : attentionTarget?.surfaceId
-            )
+            PilotModeController.shared.recordHumanDecision(requestId: requestId)
         }
 
         let resolve: @Sendable () -> Void = { [requestId, decision] in

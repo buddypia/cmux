@@ -18,6 +18,15 @@ final class PilotModeController: @unchecked Sendable {
     /// Consecutive automatic decisions per surface, reset whenever a human
     /// answers on that surface.
     private var consecutiveDecisions: [UUID: Int] = [:]
+    /// The surface each considered request belongs to. `deliverReply` knows only
+    /// a request id, and the Feed's own `AttentionTarget` carries a workspace
+    /// and panel rather than a surface, so the surface has to come from the
+    /// event we saw on the way in.
+    private var surfaceForRequest: [String: UUID] = [:]
+    /// Insertion order for `surfaceForRequest`, so a request that is never
+    /// answered (the hook gives up after 120s) cannot accumulate forever.
+    private var requestOrder: [String] = []
+    private static let maxTrackedRequests = 256
 
     init(
         settingsStore: PilotModeSettingsStore = .shared,
@@ -37,6 +46,10 @@ final class PilotModeController: @unchecked Sendable {
         guard settings.isEnabled else { return }
         guard Self.isActionable(event.hookEventName) else { return }
 
+        if let surfaceId {
+            trackRequest(requestId, surfaceId: surfaceId)
+        }
+
         Task.detached(priority: .userInitiated) { [weak self] in
             await self?.evaluate(
                 event: event,
@@ -48,14 +61,16 @@ final class PilotModeController: @unchecked Sendable {
         }
     }
 
-    /// Resets the consecutive-decision counter for a surface the user just
+    /// Resets the consecutive-decision counter for the surface the user just
     /// answered on. A human in the loop is exactly the condition the ceiling
     /// exists to force, so their answer restores the full budget.
-    func recordHumanDecision(surfaceId: UUID?) {
-        guard let surfaceId else { return }
+    ///
+    /// A request Pilot Mode never considered is not tracked, and resets nothing.
+    func recordHumanDecision(requestId: String) {
         lock.lock()
+        defer { lock.unlock() }
+        guard let surfaceId = untrackRequestLocked(requestId) else { return }
         consecutiveDecisions[surfaceId] = 0
-        lock.unlock()
     }
 
     func forgetSurface(_ surfaceId: UUID) {
@@ -63,6 +78,25 @@ final class PilotModeController: @unchecked Sendable {
         consecutiveDecisions.removeValue(forKey: surfaceId)
         lock.unlock()
         settingsStore.forgetSurface(surfaceId)
+    }
+
+    private func trackRequest(_ requestId: String, surfaceId: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        if surfaceForRequest.updateValue(surfaceId, forKey: requestId) == nil {
+            requestOrder.append(requestId)
+        }
+        while requestOrder.count > Self.maxTrackedRequests {
+            surfaceForRequest.removeValue(forKey: requestOrder.removeFirst())
+        }
+    }
+
+    /// Caller must hold `lock`.
+    @discardableResult
+    private func untrackRequestLocked(_ requestId: String) -> UUID? {
+        guard let surfaceId = surfaceForRequest.removeValue(forKey: requestId) else { return nil }
+        requestOrder.removeAll { $0 == requestId }
+        return surfaceId
     }
 
     // MARK: - Evaluation
@@ -101,10 +135,8 @@ final class PilotModeController: @unchecked Sendable {
                 decision: decision,
                 onlyIfAwaiting: true
             )
-            if applied, let surfaceId {
-                lock.lock()
-                consecutiveDecisions[surfaceId, default: 0] += 1
-                lock.unlock()
+            if applied {
+                recordAutomaticDecision(requestId: requestId, surfaceId: surfaceId)
             }
         }
 
@@ -117,6 +149,17 @@ final class PilotModeController: @unchecked Sendable {
             applied: applied,
             elapsed: Date().timeIntervalSince(startedAt)
         )
+    }
+
+    /// Synchronous so the lock is never taken from an async context, where
+    /// `NSLock` is unavailable in the Swift 6 language mode.
+    private func recordAutomaticDecision(requestId: String, surfaceId: UUID?) {
+        lock.lock()
+        defer { lock.unlock() }
+        untrackRequestLocked(requestId)
+        if let surfaceId {
+            consecutiveDecisions[surfaceId, default: 0] += 1
+        }
     }
 
     private func exceededCeiling(surfaceId: UUID, settings: PilotModeSettings) -> Bool {

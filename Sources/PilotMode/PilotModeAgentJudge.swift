@@ -10,14 +10,9 @@ import Foundation
 /// returns text; it cannot act on what it reads.
 struct PilotModeAgentJudge: PilotModeJudge {
     private let environment: [String: String]
-    private let fileManager: FileManager
 
-    init(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
-    ) {
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.environment = environment
-        self.fileManager = fileManager
     }
 
     func evaluate(
@@ -33,15 +28,15 @@ struct PilotModeAgentJudge: PilotModeJudge {
             return .unavailable
         }
 
-        let root = fileManager.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-pilot-\(UUID().uuidString)", isDirectory: true)
-        try? fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? fileManager.removeItem(at: root) }
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
 
         let promptFile = root.appendingPathComponent("prompt.txt", isDirectory: false)
         let outputFile = root.appendingPathComponent("verdict.txt", isDirectory: false)
         guard let promptData = prompt.data(using: .utf8),
-              fileManager.createFile(
+              FileManager.default.createFile(
                 atPath: promptFile.path,
                 contents: promptData,
                 attributes: [.posixPermissions: NSNumber(value: Int16(0o600))]
