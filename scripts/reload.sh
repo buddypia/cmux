@@ -68,6 +68,72 @@ XCODEBUILD_STARTED=0
 XCODEBUILD_OUTPUT_VALID=0
 XCODEBUILD_CLEANED_OUTPUTS=0
 
+# Before doing anything else, xcodebuild probes the compiler with
+# `clang -v -E -dM -x c -c /dev/null` and reads the result through a pipe that
+# SWBBuildService does not drain while clang is writing. The probe emits about
+# 20 KB. macOS carves pipe buffers out of a fixed kernel pool and, once that
+# pool is exhausted, hands every new pipe the 2 KB minimum instead of the usual
+# 16-64 KB -- so clang blocks in write() forever and the build hangs at
+# `ExecuteExternalTool ... clang -v -E -dM` with no output and no timeout.
+#
+# The pool is drained by the number of *live* pipes machine-wide, which on a
+# machine running many long-lived agents, shells, and node processes creeps up
+# over days until builds stop working. Measure the capacity we would actually
+# get and refuse to start, so the failure names its cause in milliseconds
+# instead of looking like a mysteriously frozen build.
+MINIMUM_PIPE_CAPACITY_BYTES=16384
+
+measure_pipe_capacity_bytes() {
+  python3 -c '
+import os
+r, w = os.pipe()
+os.set_blocking(w, False)
+n = 0
+try:
+    while True:
+        try:
+            n += os.write(w, b"x" * 1024)
+        except BlockingIOError:
+            break
+finally:
+    os.close(r)
+    os.close(w)
+print(n)
+' 2>/dev/null || echo ""
+}
+
+require_usable_pipe_buffers() {
+  if [[ "${CMUX_SKIP_PIPE_CAPACITY_CHECK:-}" == "1" ]]; then
+    return 0
+  fi
+  local capacity
+  capacity="$(measure_pipe_capacity_bytes)"
+  # An unreadable measurement is not evidence of a problem; let the build run.
+  if ! is_positive_integer "${capacity:-}"; then
+    return 0
+  fi
+  if (( capacity >= MINIMUM_PIPE_CAPACITY_BYTES )); then
+    return 0
+  fi
+  {
+    echo ""
+    echo "error: this machine's pipe buffers are ${capacity} bytes (need >= ${MINIMUM_PIPE_CAPACITY_BYTES})."
+    echo "       xcodebuild's compiler probe writes ~20 KB into a pipe nothing is"
+    echo "       draining, so the build would hang forever at"
+    echo "       'ExecuteExternalTool ... clang -v -E -dM' instead of failing."
+    echo ""
+    echo "       The kernel pipe pool is exhausted by long-lived processes. To see"
+    echo "       the biggest holders:"
+    echo ""
+    echo "         scripts/diagnose-pipe-pressure.sh"
+    echo ""
+    echo "       Quit them (or reboot) and run this again. To build anyway, set"
+    echo "       CMUX_SKIP_PIPE_CAPACITY_CHECK=1."
+    echo ""
+  } >&2
+  exit 75
+}
+
 should_skip_ghostty_cli_helper_zig_build() {
   if [[ "${CMUX_SKIP_ZIG_BUILD:-}" == "1" ]]; then
     AUTO_SKIP_ZIG_BUILD_REASON="CMUX_SKIP_ZIG_BUILD=1"
@@ -639,6 +705,10 @@ if [[ -n "$DERIVED_DATA" ]]; then
   fi
 fi
 
+# Checked before the log redirect and before any build work, so the diagnosis
+# lands on the terminal and costs nothing when the machine is healthy.
+require_usable_pipe_buffers
+
 # Save the original stdout/stderr so the EXIT trap can write the user-facing
 # summary after the body redirect, then redirect bulk output into the log.
 exec 3>&1 4>&2
@@ -649,6 +719,15 @@ reload_finalize() {
   trap - EXIT
   exec 1>&3 2>&4
   local elapsed=$(( $(date +%s) - RELOAD_START_TIME ))
+  # Success has to be earned, not inherited. When the script is killed, bash
+  # runs the EXIT trap carrying the *previous* command's status, so a SIGTERM
+  # landing after any successful command arrives here as rc=0 and used to print
+  # "reload succeeded" over a build that produced nothing. Only the app bundle
+  # validated at XCODEBUILD_OUTPUT_VALID proves a build happened.
+  if [[ "$rc" -eq 0 && "$XCODEBUILD_STARTED" -eq 1 && "$XCODEBUILD_OUTPUT_VALID" -ne 1 ]]; then
+    echo "error: xcodebuild did not produce a validated app bundle" >&2
+    rc=70
+  fi
   if [[ "$rc" -ne 0 ]]; then
     if [[ "$XCODEBUILD_STARTED" -eq 1 && "$XCODEBUILD_OUTPUT_VALID" -ne 1 ]]; then
       cleanup_incomplete_xcodebuild_outputs
@@ -712,6 +791,11 @@ reload_finalize() {
   fi
 }
 trap reload_finalize EXIT
+# Turn a signal into a non-zero exit so reload_finalize reports the interruption
+# instead of whatever status the last completed command happened to leave.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # Tell the user we're starting (visible even though body output is redirected).
 echo "==> reload starting (tag: ${TAG}, log: ${RELOAD_LOG})" >&3
