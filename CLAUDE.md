@@ -25,6 +25,14 @@ xcodebuild -project cmux.xcodeproj -scheme cmux-unit -configuration Debug -desti
 
 If that fails in the Ghostty CLI helper with `cannot execute tool 'metal' due to missing Metal Toolchain`, either install the component once (`xcodebuild -downloadComponent MetalToolchain`) or prefix the command with `CMUX_SKIP_ZIG_BUILD=1`, which `scripts/build-ghostty-cli-helper.sh` supports. The skip substitutes a stub for the bundled `bin/ghostty` CLI; terminal rendering comes from GhosttyKit and is unaffected, so it is fine for tests and dogfood but not for shipping a build.
 
+## When xcodebuild hangs with no output
+
+If a build sits forever at `ExecuteExternalTool ... clang -v -E -dM -x c -c /dev/null`, the machine is out of kernel pipe buffer, not stuck on this project. macOS carves pipe buffers from a fixed pool; once it is exhausted every new pipe gets 2 KB or less instead of 16-64 KB. xcodebuild's compiler probe writes ~20 KB into a pipe SWBBuildService does not drain while clang writes, so clang blocks in `write()` with no timeout and no error. It reproduces on an empty one-file package, so a hang here is never evidence about your branch.
+
+`reload.sh` checks for this before building and aborts in about a second. Run `scripts/diagnose-pipe-pressure.sh` to see the capacity and the biggest holders — long-lived agents, shells, and node processes accumulate pipes over days. Quit the top offenders or reboot. `CMUX_SKIP_PIPE_CAPACITY_CHECK=1` forces a build anyway, which will hang.
+
+Never trust a `==> reload succeeded` line on its own: confirm it also printed `App path:`. A successful reload always does.
+
 Rebuild GhosttyKit.xcframework with Release optimizations:
 
 ```bash
