@@ -3870,6 +3870,9 @@ struct CMUXCLI {
         case "agent-hibernation":
             try runAgentHibernation(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
 
+        case "pilot":
+            try runPilot(commandArgs: commandArgs, client: client, jsonOutput: jsonOutput)
+
         case "auth", "login", "logout":
             let authArgs = command == "auth" ? commandArgs : [command] + commandArgs
             let sub = authArgs.first?.lowercased() ?? "status"
@@ -15714,6 +15717,8 @@ struct CMUXCLI {
             Enable or disable routine Agent Hibernation.
             Configure idle and live-terminal limits from Settings or cmux settings JSON.
             """
+        case "pilot":
+            return PilotModeCLI.usage
         case "restore-session":
             return """
             Usage: cmux restore-session
@@ -35994,6 +35999,7 @@ export default CMUXSessionRestore;
           shortcuts
           disable-browser | enable-browser | browser-status
           agent-hibernation <on|off>
+          pilot [status|off] [--this-tab | --surface <uuid>]
           restore <kind> <checkpoint-id> | restore --surface [id|ref]
           restore-session
           open <path-or-url>... [--workspace <id|ref|index>] [--surface <id|ref|index>] [--pane <id|ref|index>] [--window <id|ref|index>] [--focus <true|false>] [--no-focus]

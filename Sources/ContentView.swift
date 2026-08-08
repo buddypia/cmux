@@ -7524,6 +7524,7 @@ struct ContentView: View {
             panelSubtitle: panelSubtitle
         )
         appendSavedLayoutCommandContributions(to: &contributions, workspaceSubtitle: workspaceSubtitle)
+        appendPilotModeCommandContributions(to: &contributions)
 
         contributions.append(
             CommandPaletteCommandContribution(
@@ -8522,6 +8523,7 @@ struct ContentView: View {
             notificationStore.markUnread(forTabId: workspaceId)
         }
         registerIdentifierCopyCommandHandlers(&registry)
+        registerPilotModeCommandHandlers(&registry)
 
         registry.register(commandId: "palette.renameTab") {
             beginRenameTabFlow()

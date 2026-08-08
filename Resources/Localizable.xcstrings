@@ -56811,6 +56811,23 @@
         }
       }
     },
+    "command.clearPilotModeTabOverride.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the Default Pilot Mode for This Tab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このタブでパイロットモードの既定を使う"
+          }
+        }
+      }
+    },
     "command.clearTabName.title": {
       "extractionState": "manual",
       "localizations": {
@@ -63575,6 +63592,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Todoペインを開く"
+          }
+        }
+      }
+    },
+    "command.pilotModeForTab.subtitle.inherited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Following the default • %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "既定に従う • %@"
+          }
+        }
+      }
+    },
+    "command.pilotModeForTab.subtitle.override": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This tab only • %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このタブのみ • %@"
+          }
+        }
+      }
+    },
+    "command.pilotModeForTab.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pilot Mode for This Tab"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このタブのパイロットモード"
           }
         }
       }

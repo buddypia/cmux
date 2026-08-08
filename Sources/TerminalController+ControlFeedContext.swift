@@ -24,4 +24,12 @@ extension TerminalController: ControlFeedContext {
             JSONValue(foundationObject: FeedSocketEncoding.itemDict(item)) ?? .object([:])
         }
     }
+
+    func controlFeedPilotStatus(surfaceID: UUID?) -> JSONValue {
+        PilotModeSocketPayload.status(forSurface: surfaceID)
+    }
+
+    func controlFeedPilotDisable(surfaceID: UUID?) -> JSONValue {
+        PilotModeSocketPayload.disable(forSurface: surfaceID)
+    }
 }

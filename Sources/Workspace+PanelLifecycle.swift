@@ -573,6 +573,10 @@ extension Workspace {
         }
 
         let removedPanel = panels.removeValue(forKey: panelId)
+        // The Pilot Mode override and decision budget are keyed by surface id.
+        // Dropping them here is what keeps a closed tab from handing its
+        // delegation policy to whatever surface reuses the identifier.
+        PilotModeController.shared.forgetSurface(panelId)
         if discardAgentHibernationTracking {
             AgentHibernationController.shared.discardTrackingStateForClosedPanel(
                 workspaceId: id,
