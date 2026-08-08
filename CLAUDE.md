@@ -27,11 +27,17 @@ If that fails in the Ghostty CLI helper with `cannot execute tool 'metal' due to
 
 ## When xcodebuild hangs with no output
 
-If a build sits forever at `ExecuteExternalTool ... clang -v -E -dM -x c -c /dev/null`, the machine is out of kernel pipe buffer, not stuck on this project. macOS carves pipe buffers from a fixed pool; once it is exhausted every new pipe gets 2 KB or less instead of 16-64 KB. xcodebuild's compiler probe writes ~20 KB into a pipe SWBBuildService does not drain while clang writes, so clang blocks in `write()` with no timeout and no error. It reproduces on an empty one-file package, so a hang here is never evidence about your branch.
+If a build sits forever at `ExecuteExternalTool ... clang -v -E -dM -x c -c /dev/null`, it is not stuck on this project — it reproduces on an empty one-file package. SWBBuildService reads that probe's stdout (the ~15 KB `-dM` macro dump it wants) and never drains its stderr, which `-v` fills with another ~5 KB. That goes unnoticed while a pipe holds 64 KB. macOS carves pipe buffers from a fixed pool, and on a machine holding thousands of live pipes new ones come back far smaller, so clang blocks in `write()` with no timeout and no error.
 
-`reload.sh` checks for this before building and aborts in about a second. Run `scripts/diagnose-pipe-pressure.sh` to see the capacity and the biggest holders — long-lived agents, shells, and node processes accumulate pipes over days. Quit the top offenders or reboot. `CMUX_SKIP_PIPE_CAPACITY_CHECK=1` forces a build anyway, which will hang.
+`reload.sh` exports `CCC_OVERRIDE_OPTIONS=x-v`, which deletes `-v` from every clang driver invocation. The probe's stderr drops from 4,843 bytes to 145 and its stdout stays byte-identical, so the only thing lost is output nothing was reading. Real compile commands do not pass `-v`. A full build under it completes with 0 errors and the tests run. Pass the same variable when invoking the compile-only check by hand:
 
-**Do not try to out-wait or out-tune it.** Capacity fluctuates, so it is tempting to poll until a healthy window opens and start then. That has been tried and does not work: the build's own startup is what tips the pool over, so it exhausts it and deadlocks on its own probe even when the reading was 65536 a second earlier. Warm DerivedData, `-disableAutomaticPackageResolution`, and `-jobs 1` do not change this. The live pipe count has to come down first. There is also no sysctl for the pool size, and no SwiftPM substitute for the app target — it has a bridging header.
+```bash
+CCC_OVERRIDE_OPTIONS=x-v xcodebuild -project cmux.xcodeproj -scheme cmux-unit -configuration Debug -destination 'platform=macOS' -derivedDataPath /tmp/cmux-<tag> build-for-testing
+```
+
+It is applied unconditionally, and gating it on a measurement is a trap worth not re-discovering: capacity fluctuates, and the build's own startup is what tips the pool over, so a reading taken beforehand comes back healthy and the build then deadlocks anyway. Polling for a good window, warm DerivedData, `-disableAutomaticPackageResolution`, and `-jobs 1` were all tried and all still hang. There is no sysctl for the pool size, and the app target cannot be routed through SwiftPM instead — it uses a bridging header.
+
+`scripts/diagnose-pipe-pressure.sh` shows what is holding the pool when you want to know why a machine got there; long-lived agents, shells, and node processes accumulate pipes over days.
 
 Never trust a `==> reload succeeded` line on its own: confirm it also printed `App path:`. A successful reload always does.
 
