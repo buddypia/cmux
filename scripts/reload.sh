@@ -68,38 +68,60 @@ XCODEBUILD_STARTED=0
 XCODEBUILD_OUTPUT_VALID=0
 XCODEBUILD_CLEANED_OUTPUTS=0
 
-# Before doing anything else, xcodebuild probes the compiler with
+# Before doing anything else, the build probes the compiler with
 # `clang -v -E -dM -x c -c /dev/null` and reads the result through a pipe that
 # SWBBuildService does not drain while clang is writing. The probe emits about
 # 20 KB. macOS carves pipe buffers out of a fixed kernel pool and, once that
-# pool is exhausted, hands every new pipe the 2 KB minimum instead of the usual
-# 16-64 KB -- so clang blocks in write() forever and the build hangs at
+# pool is exhausted, hands every new pipe a fraction of the usual 16-64 KB --
+# so clang blocks in write() forever and the build hangs at
 # `ExecuteExternalTool ... clang -v -E -dM` with no output and no timeout.
 #
-# The pool is drained by the number of *live* pipes machine-wide, which on a
-# machine running many long-lived agents, shells, and node processes creeps up
-# over days until builds stop working. Measure the capacity we would actually
-# get and refuse to start, so the failure names its cause in milliseconds
-# instead of looking like a mysteriously frozen build.
-MINIMUM_PIPE_CAPACITY_BYTES=16384
+# Measuring one pipe at rest is not enough, and getting that wrong costs the
+# whole build timeout. Observed on a machine holding ~5,100 live pipes:
+#
+#   at rest              65536 bytes   <- looks perfectly healthy
+#   with 96 more in use  16384 bytes
+#   during a build         512 bytes   <- clang deadlocks here
+#
+# The build is what tips the pool over, so the question is not "how big is a
+# pipe right now" but "is there room for the pipes a build is about to create".
+# Hold a modest number open -- well under what a real build spawns -- and check
+# that a new pipe can still absorb the probe.
+# A pipe must still hold this much with PIPE_HEADROOM_PROBES others open. The
+# probe needs ~20 KB in one pipe when stdout and stderr share it.
+MINIMUM_PIPE_CAPACITY_BYTES=32768
+PIPE_HEADROOM_PROBES=96
 
-measure_pipe_capacity_bytes() {
+measure_pipe_capacity_under_load() {
   python3 -c '
 import os
-r, w = os.pipe()
-os.set_blocking(w, False)
-n = 0
+import sys
+
+held = []
 try:
-    while True:
-        try:
-            n += os.write(w, b"x" * 1024)
-        except BlockingIOError:
-            break
+    for _ in range(int(sys.argv[1])):
+        held.append(os.pipe())
+    read_fd, write_fd = os.pipe()
+    os.set_blocking(write_fd, False)
+    capacity = 0
+    try:
+        while True:
+            try:
+                capacity += os.write(write_fd, b"x" * 1024)
+            except BlockingIOError:
+                break
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+    print(capacity)
+except OSError:
+    # Out of descriptors or similar: not evidence about the pipe pool.
+    pass
 finally:
-    os.close(r)
-    os.close(w)
-print(n)
-' 2>/dev/null || echo ""
+    for read_fd, write_fd in held:
+        os.close(read_fd)
+        os.close(write_fd)
+' "$PIPE_HEADROOM_PROBES" 2>/dev/null || echo ""
 }
 
 require_usable_pipe_buffers() {
@@ -107,7 +129,7 @@ require_usable_pipe_buffers() {
     return 0
   fi
   local capacity
-  capacity="$(measure_pipe_capacity_bytes)"
+  capacity="$(measure_pipe_capacity_under_load)"
   # An unreadable measurement is not evidence of a problem; let the build run.
   if ! is_positive_integer "${capacity:-}"; then
     return 0
@@ -117,7 +139,8 @@ require_usable_pipe_buffers() {
   fi
   {
     echo ""
-    echo "error: this machine's pipe buffers are ${capacity} bytes (need >= ${MINIMUM_PIPE_CAPACITY_BYTES})."
+    echo "error: with ${PIPE_HEADROOM_PROBES} pipes in use this machine hands out ${capacity}-byte pipes"
+    echo "       (need >= ${MINIMUM_PIPE_CAPACITY_BYTES}). The kernel pipe pool has no room for a build."
     echo "       xcodebuild's compiler probe writes ~20 KB into a pipe nothing is"
     echo "       draining, so the build would hang forever at"
     echo "       'ExecuteExternalTool ... clang -v -E -dM' instead of failing."
